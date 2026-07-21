@@ -1,7 +1,48 @@
 use craftel_core::{
+    automation::{PROMPT_VERSION, build_prompt},
     runs::{EventKind, Phase, RunRepository, RunState},
     storage::{NewTask, SqliteRepository},
 };
+
+#[test]
+fn exact_phase_prompt_snapshots_do_not_include_environment_secrets() {
+    unsafe { std::env::set_var("CRAFTEL_ACCEPTANCE_SECRET", "must-not-leak") };
+    let common = |stage: &str, workflow: &str| {
+        format!(
+            "CRAFTEL autonomous phase prompt v1\n\nTask ID: T0007\nProject ID: project-id\nAbsolute work directory: /isolated/project\nCurrent stage: {stage}\n\n{workflow}\n\nDocument ownership: TASK.md is generated and owned by CRAFTEL; do not edit TASK.md. Put agent-authored work in SPEC.md or supporting decisions/, discussions/, notes/, subtasks/, plans/, and reviews/ directories. Inspect all required artifacts, code, and tests before deciding the outcome.\n\nOn success, run exactly:\ncraftel pass T0007 --project project-id\n\nOn failure, run exactly:\ncraftel fail T0007 --project project-id\n\nInvoke exactly one of those commands before exiting. Do not infer or merely describe the transition. Do not commit, push, open a pull request, release, deploy, or deliver anything."
+        )
+    };
+    let cases = [
+        (
+            Phase::Defining,
+            "defining",
+            "Use the installed define-spec workflow. Override its review-turn pause: proceed autonomously from the approved design and context, write the specification, and verify it.",
+        ),
+        (
+            Phase::Implementation,
+            "implementation",
+            "Use the installed implement-spec workflow and the current agent-owned documents. Inspect the specification, supporting artifacts, code, and tests; implement and verify the task autonomously.",
+        ),
+        (
+            Phase::Reviewing,
+            "reviewing",
+            "Perform a fresh evidence-based formal review in this newly created review session. Inspect the specification, supporting artifacts, code, and tests, and write a review record. Do not reuse implementation context and do not implement fixes in this review session.",
+        ),
+    ];
+    for (phase, stage, workflow) in cases {
+        let prompt = build_prompt(
+            phase,
+            "T0007",
+            "project-id",
+            std::path::Path::new("/isolated/project"),
+        );
+        assert_eq!(prompt.kind, phase);
+        assert_eq!(prompt.version, PROMPT_VERSION);
+        assert_eq!(prompt.text, common(stage, workflow));
+        assert!(!prompt.text.contains("must-not-leak"));
+    }
+    unsafe { std::env::remove_var("CRAFTEL_ACCEPTANCE_SECRET") };
+}
 #[test]
 fn durable_ordered_runs_and_terminal_immutability() {
     let t = tempfile::tempdir().unwrap();

@@ -16,6 +16,7 @@ const DOCUMENT_STATUS_MIGRATION: &str = include_str!("../../migrations/004_docum
 const HARNESS_MIGRATION: &str = include_str!("../../migrations/005_harness.sql");
 const SUPERVISOR_HARDENING_MIGRATION: &str =
     include_str!("../../migrations/006_supervisor_hardening.sql");
+const AUTOMATION_MIGRATION: &str = include_str!("../../migrations/007_automation.sql");
 
 pub struct NewTask {
     pub project_id: String,
@@ -83,6 +84,9 @@ impl SqliteRepository {
         connection.execute_batch(DOCUMENT_STATUS_MIGRATION)?;
         connection.execute_batch(HARNESS_MIGRATION)?;
         connection.execute_batch(SUPERVISOR_HARDENING_MIGRATION)?;
+        if !column_exists(&connection, "runs", "stage_at_start")? {
+            connection.execute_batch(AUTOMATION_MIGRATION)?;
+        }
         Ok(Self { connection })
     }
 
@@ -183,7 +187,9 @@ impl SqliteRepository {
         task_id: &str,
         action: WorkflowAction,
     ) -> Result<Task, StorageError> {
-        let tx = self.connection.transaction()?;
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut task = tx.query_row("SELECT id,project_id,title,content,stage,relative_dir,review_approved,created_at,updated_at FROM tasks WHERE project_id=?1 AND id=?2", params![project_id,task_id], task_from_row).optional()?.ok_or(StorageError::NotFound)?;
         let event = task.apply_action(action, Utc::now())?;
         tx.execute("UPDATE tasks SET stage=?1,review_approved=?2,updated_at=?3,projection_dirty=1 WHERE project_id=?4 AND id=?5", params![task.stage.to_string(),task.review_approved,timestamp(task.updated_at),project_id,task_id])?;

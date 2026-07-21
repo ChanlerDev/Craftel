@@ -3,7 +3,7 @@ use std::{fmt::Display, path::PathBuf};
 use craftel_core::{
     documents::{Document, DocumentProjectStatus, DocumentSnapshot, ExpectedDocumentState},
     domain::{Project, Stage, Task},
-    runs::{Phase, PhaseSession, Run, RunEvent},
+    runs::{PhaseSession, Run, RunEvent},
 };
 use serde::Serialize;
 use tauri::State;
@@ -36,28 +36,16 @@ fn with_runs<T>(
 }
 
 #[tauri::command]
-pub fn start_phase_run(
+pub fn start_current_phase(
     state: State<'_, AppState>,
     project_id: String,
     task_id: String,
-    phase: Phase,
-    prompt: String,
 ) -> Result<Run, IpcError> {
-    with_runs(&state, |s| {
-        s.start_phase_run(&project_id, &task_id, phase, &prompt)
-    })
+    with_runs(&state, |s| s.start_current_phase(&project_id, &task_id))
 }
 #[tauri::command]
 pub fn stop_run(state: State<'_, AppState>, run_id: String) -> Result<Run, IpcError> {
     with_runs(&state, |s| s.stop_run(&run_id))
-}
-#[tauri::command]
-pub fn follow_up(
-    state: State<'_, AppState>,
-    session_id: String,
-    prompt: String,
-) -> Result<Run, IpcError> {
-    with_runs(&state, |s| s.follow_up(&session_id, &prompt))
 }
 #[tauri::command]
 pub fn get_session(

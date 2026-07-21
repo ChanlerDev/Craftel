@@ -1,3 +1,4 @@
+use crate::automation::AutomationPrompt;
 use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -24,7 +25,7 @@ pub enum RunError {
 macro_rules! string_enum { ($n:ident { $($v:ident => $s:literal),+ $(,)? }) => {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)] #[serde(rename_all="snake_case")]
     pub enum $n { $($v),+ }
-    impl $n { fn as_str(self)->&'static str { match self { $(Self::$v=>$s),+ } } fn parse(s:&str)->Result<Self,RunError>{match s {$($s=>Ok(Self::$v),)+ _=>Err(RunError::Invalid(format!("unknown {} {s}",stringify!($n))))}} }
+    impl $n { pub fn as_str(self)->&'static str { match self { $(Self::$v=>$s),+ } } fn parse(s:&str)->Result<Self,RunError>{match s {$($s=>Ok(Self::$v),)+ _=>Err(RunError::Invalid(format!("unknown {} {s}",stringify!($n))))}} }
 }; }
 string_enum!(Phase { Defining=>"defining", Implementation=>"implementation", Reviewing=>"reviewing" });
 string_enum!(RunState { Queued=>"queued", Running=>"running", Succeeded=>"succeeded", Failed=>"failed", Stopped=>"stopped", Interrupted=>"interrupted" });
@@ -66,6 +67,12 @@ pub struct Run {
     pub final_result: Option<String>,
     pub stop_requested_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
+    pub stage_at_start: Option<Phase>,
+    pub workflow_event_id_before: Option<i64>,
+    pub prompt_kind: Option<Phase>,
+    pub prompt_version: Option<i64>,
+    pub observed_transition_event_id: Option<i64>,
+    pub missing_transition: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -104,6 +111,12 @@ impl RunRepository {
         c.pragma_update(None, "foreign_keys", true)?;
         c.execute_batch(include_str!("../migrations/005_harness.sql"))?;
         c.execute_batch(include_str!("../migrations/006_supervisor_hardening.sql"))?;
+        if !columns_for(&c, "runs")?
+            .iter()
+            .any(|x| x == "stage_at_start")
+        {
+            c.execute_batch(include_str!("../migrations/007_automation.sql"))?;
+        }
         let columns: Vec<String> = {
             let mut statement = c.prepare("PRAGMA table_info(run_supervisor_lease)")?;
             statement
@@ -203,7 +216,7 @@ impl RunRepository {
         p: &str,
         t: &str,
         phase: Phase,
-        prompt: &str,
+        prompt: &AutomationPrompt,
     ) -> Result<(PhaseSession, Run), RunError> {
         let tx = self
             .connection
@@ -212,7 +225,18 @@ impl RunRepository {
         if active {
             return Err(RunError::ActiveRun);
         }
-        let work: String = tx.query_row("SELECT work_dir FROM projects WHERE id=?1 AND EXISTS(SELECT 1 FROM tasks WHERE project_id=?1 AND id=?2)", params![p,t], |r| r.get(0)).optional()?.ok_or(RunError::NotFound)?;
+        let (work, stage): (String,String) = tx.query_row("SELECT p.work_dir,t.stage FROM projects p JOIN tasks t ON t.project_id=p.id WHERE p.id=?1 AND t.id=?2", params![p,t], |r| Ok((r.get(0)?,r.get(1)?))).optional()?.ok_or(RunError::NotFound)?;
+        if stage != phase.as_str() {
+            return Err(RunError::Invalid(format!(
+                "task stage is {stage}, not {}",
+                phase.as_str()
+            )));
+        }
+        let baseline: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(event_id),0) FROM workflow_events",
+            [],
+            |r| r.get(0),
+        )?;
         let existing: Option<String> = if phase == Phase::Reviewing {
             None
         } else {
@@ -228,7 +252,7 @@ impl RunRepository {
         )?;
         let id = Uuid::new_v4().to_string();
         let token = Uuid::new_v4().to_string();
-        tx.execute("INSERT INTO runs(id,session_id,project_id,task_id,sequence,state,prompt,harness,model,work_dir,ownership_token,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,'queued',?6,'cursor',NULL,?7,?8,?9,?9)",params![id,sid,p,t,seq,prompt,work,token,n]).map_err(|e| if matches!(&e,rusqlite::Error::SqliteFailure(x,_) if x.extended_code==2067) { RunError::ActiveRun } else { e.into() })?;
+        tx.execute("INSERT INTO runs(id,session_id,project_id,task_id,sequence,state,prompt,harness,model,work_dir,ownership_token,created_at,updated_at,stage_at_start,workflow_event_id_before,prompt_kind,prompt_version) VALUES(?1,?2,?3,?4,?5,'queued',?6,'cursor',NULL,?7,?8,?9,?9,?10,?11,?12,?13)",params![id,sid,p,t,seq,prompt.text,work,token,n,phase.as_str(),baseline,prompt.kind.as_str(),prompt.version]).map_err(|e| if matches!(&e,rusqlite::Error::SqliteFailure(x,_) if x.extended_code==2067) { RunError::ActiveRun } else { e.into() })?;
         tx.commit()?;
         Ok((self.get_session(&sid)?, self.get_run(&id)?))
     }
@@ -312,6 +336,48 @@ impl RunRepository {
         if self.connection.execute("UPDATE runs SET state='running',pid=?1,harness_version=?2,started_at=?3,updated_at=?3 WHERE id=?4 AND state='queued'",params![pid,version,n,id])?!=1{return Err(RunError::Invalid("run is not queued".into()))}
         self.get_run(id)
     }
+
+    /// Revalidate an automation reservation and spawn while holding the short write reservation.
+    /// The child blocks in its CLI transition until this transaction commits.
+    pub fn preflight_and_spawn<F>(
+        &mut self,
+        id: &str,
+        version: &str,
+        spawn: F,
+    ) -> Result<(Run, std::process::Child), RunError>
+    where
+        F: FnOnce() -> std::io::Result<std::process::Child>,
+    {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (project, task, stage, baseline): (String, String, Option<String>, Option<i64>) = tx.query_row(
+            "SELECT project_id,task_id,stage_at_start,workflow_event_id_before FROM runs WHERE id=?1 AND state='queued'",
+            [id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?
+            .ok_or_else(|| RunError::Invalid("run is not queued".into()))?;
+        let mismatch = if let (Some(stage), Some(baseline)) = (stage.as_deref(), baseline) {
+            let current: String = tx.query_row(
+                "SELECT stage FROM tasks WHERE project_id=?1 AND id=?2",
+                params![project, task],
+                |r| r.get(0),
+            )?;
+            let changed: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_events WHERE project_id=?1 AND task_id=?2 AND event_id>?3)", params![project,task,baseline], |r| r.get(0))?;
+            current != stage || changed
+        } else {
+            false
+        };
+        if mismatch {
+            let n = now();
+            tx.execute("UPDATE runs SET state='failed',error='task stage changed before launch',finished_at=?1,updated_at=?1,missing_transition=0 WHERE id=?2 AND state='queued'", params![n,id])?;
+            tx.commit()?;
+            return Err(RunError::Invalid("task stage changed before launch".into()));
+        }
+        let child = spawn()?;
+        let n = now();
+        tx.execute("UPDATE runs SET state='running',pid=?1,harness_version=?2,started_at=?3,updated_at=?3 WHERE id=?4 AND state='queued'", params![child.id(),version,n,id])?;
+        tx.commit()?;
+        Ok((self.get_run(id)?, child))
+    }
     pub fn mark_stop_requested(&mut self, id: &str) -> Result<Run, RunError> {
         let n = now();
         self.connection.execute("UPDATE runs SET stop_requested_at=COALESCE(stop_requested_at,?1),updated_at=?1 WHERE id=?2 AND state IN ('queued','running')",params![n,id])?;
@@ -331,6 +397,35 @@ impl RunRepository {
         }
         let n = now();
         if self.connection.execute("UPDATE runs SET state=?1,exit_code=?2,stderr=?3,final_result=?4,error=?5,finished_at=?6,updated_at=?6 WHERE id=?7 AND state IN ('queued','running')",params![state.as_str(),code,stderr,result,error,n,id])?!=1{return Err(RunError::Invalid("terminal run is immutable".into()))}
+        self.get_run(id)
+    }
+    pub fn finish_with_transition(
+        &mut self,
+        id: &str,
+        state: RunState,
+        code: Option<i32>,
+        stderr: &str,
+        result: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<Run, RunError> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (project, task, stage, baseline): (String, String, Option<String>, Option<i64>) = tx.query_row(
+            "SELECT project_id,task_id,stage_at_start,workflow_event_id_before FROM runs WHERE id=?1 AND state IN ('queued','running')",
+            [id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))
+            .optional()?.ok_or_else(|| RunError::Invalid("terminal run is immutable".into()))?;
+        let observed: Option<i64> = match (stage.as_deref(), baseline) {
+            (Some(stage), Some(baseline)) => tx.query_row(
+                "SELECT event_id FROM workflow_events WHERE project_id=?1 AND task_id=?2 AND event_id>?3 AND from_stage=?4 AND action IN ('\"pass\"','\"fail\"') ORDER BY event_id LIMIT 1",
+                params![project,task,baseline,stage], |r| r.get(0)).optional()?,
+            _ => None,
+        };
+        let automation = stage.is_some() && baseline.is_some() && tx.query_row("SELECT prompt_kind IS NOT NULL AND prompt_version IS NOT NULL FROM runs WHERE id=?1", [id], |r| r.get::<_, bool>(0))?;
+        let n = now();
+        tx.execute("UPDATE runs SET state=?1,exit_code=?2,stderr=?3,final_result=?4,error=?5,finished_at=?6,updated_at=?6,observed_transition_event_id=?7,missing_transition=?8 WHERE id=?9 AND state IN ('queued','running')",
+            params![state.as_str(),code,stderr,result,error,n,observed,automation && observed.is_none(),id])?;
+        tx.commit()?;
         self.get_run(id)
     }
     pub fn append_event(
@@ -371,14 +466,25 @@ impl RunRepository {
         )
     }
     pub fn get_run(&self, id: &str) -> Result<Run, RunError> {
-        self.connection.query_row("SELECT id,session_id,project_id,task_id,sequence,state,prompt,harness,harness_version,model,work_dir,request_id,pid,ownership_token,started_at,finished_at,exit_code,stderr,final_result,stop_requested_at,error,created_at,updated_at FROM runs WHERE id=?1",[id],run_row).optional()?.ok_or(RunError::NotFound)
+        self.connection
+            .query_row(
+                &format!("SELECT {RUN_COLUMNS} FROM runs WHERE id=?1"),
+                [id],
+                run_row,
+            )
+            .optional()?
+            .ok_or(RunError::NotFound)
     }
     pub fn list_runs(&self, session: &str) -> Result<Vec<Run>, RunError> {
-        let mut s=self.connection.prepare("SELECT id,session_id,project_id,task_id,sequence,state,prompt,harness,harness_version,model,work_dir,request_id,pid,ownership_token,started_at,finished_at,exit_code,stderr,final_result,stop_requested_at,error,created_at,updated_at FROM runs WHERE session_id=?1 ORDER BY sequence")?;
+        let mut s = self.connection.prepare(&format!(
+            "SELECT {RUN_COLUMNS} FROM runs WHERE session_id=?1 ORDER BY sequence"
+        ))?;
         Ok(s.query_map([session], run_row)?.collect::<Result<_, _>>()?)
     }
     pub fn stale_runs(&self) -> Result<Vec<Run>, RunError> {
-        let mut s=self.connection.prepare("SELECT id,session_id,project_id,task_id,sequence,state,prompt,harness,harness_version,model,work_dir,request_id,pid,ownership_token,started_at,finished_at,exit_code,stderr,final_result,stop_requested_at,error,created_at,updated_at FROM runs WHERE state IN ('queued','running')")?;
+        let mut s = self.connection.prepare(&format!(
+            "SELECT {RUN_COLUMNS} FROM runs WHERE state IN ('queued','running')"
+        ))?;
         Ok(s.query_map([], run_row)?.collect::<Result<_, _>>()?)
     }
     pub fn update_request_id(&mut self, id: &str, request: &str) -> Result<(), RunError> {
@@ -426,7 +532,24 @@ fn run_row(r: &rusqlite::Row) -> rusqlite::Result<Run> {
         error: r.get(20)?,
         created_at: dt(r.get(21)?)?,
         updated_at: dt(r.get(22)?)?,
+        stage_at_start: r
+            .get::<_, Option<String>>(23)?
+            .map(|x| Phase::parse(&x).map_err(sql_err))
+            .transpose()?,
+        workflow_event_id_before: r.get(24)?,
+        prompt_kind: r
+            .get::<_, Option<String>>(25)?
+            .map(|x| Phase::parse(&x).map_err(sql_err))
+            .transpose()?,
+        prompt_version: r.get(26)?,
+        observed_transition_event_id: r.get(27)?,
+        missing_transition: r.get(28)?,
     })
+}
+const RUN_COLUMNS: &str = "id,session_id,project_id,task_id,sequence,state,prompt,harness,harness_version,model,work_dir,request_id,pid,ownership_token,started_at,finished_at,exit_code,stderr,final_result,stop_requested_at,error,created_at,updated_at,stage_at_start,workflow_event_id_before,prompt_kind,prompt_version,observed_transition_event_id,missing_transition";
+fn columns_for(c: &Connection, table: &str) -> Result<Vec<String>, rusqlite::Error> {
+    let mut s = c.prepare(&format!("PRAGMA table_info({table})"))?;
+    s.query_map([], |r| r.get(1))?.collect()
 }
 fn event_row(r: &rusqlite::Row) -> rusqlite::Result<RunEvent> {
     Ok(RunEvent {

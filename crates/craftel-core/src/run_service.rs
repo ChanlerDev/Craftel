@@ -1,4 +1,5 @@
 use crate::{
+    automation::build_prompt,
     harness::{CursorHarness, NdjsonParser, ParsedEvent, append_bounded},
     runs::{Phase, PhaseSession, Run, RunError, RunEvent, RunRepository, RunState},
 };
@@ -256,6 +257,8 @@ pub enum RunServiceError {
     Poisoned,
     #[error("another run supervisor owns this database")]
     LeaseHeld,
+    #[error("run supervisor is non-operational: {0}")]
+    NonOperational(String),
 }
 
 pub struct RunService {
@@ -270,6 +273,7 @@ pub struct RunService {
     heartbeat_stop: Option<mpsc::Sender<()>>,
     heartbeat: Option<JoinHandle<()>>,
     operational: Arc<AtomicBool>,
+    terminal_error: Arc<Mutex<Option<String>>>,
 }
 impl RunService {
     pub fn open(database: &Path, executable: impl Into<PathBuf>) -> Result<Self, RunServiceError> {
@@ -305,6 +309,7 @@ impl RunService {
         let heartbeat_owner = owner.clone();
         let controllers = Arc::new(Mutex::new(HashMap::<String, Controller>::new()));
         let operational = Arc::new(AtomicBool::new(true));
+        let terminal_error = Arc::new(Mutex::new(None));
         let heartbeat_operational = operational.clone();
         let heartbeat_controllers = controllers.clone();
         let heartbeat = thread::spawn(move || {
@@ -343,6 +348,7 @@ impl RunService {
             heartbeat_stop: Some(stop_tx),
             heartbeat: Some(heartbeat),
             operational,
+            terminal_error,
         };
         if let Err(error) = service.recover_stale() {
             service.shutdown();
@@ -361,21 +367,39 @@ impl RunService {
     fn repo(&self) -> Result<RunRepository, RunServiceError> {
         Ok(RunRepository::open(&self.database)?)
     }
-    pub fn start_phase_run(
-        &mut self,
-        p: &str,
-        t: &str,
-        phase: Phase,
-        prompt: &str,
-    ) -> Result<Run, RunServiceError> {
+    fn ensure_operational(&self) -> Result<(), RunServiceError> {
         if !self.operational.load(Ordering::Acquire) {
-            return Err(RunServiceError::LeaseHeld);
+            let detail = self
+                .terminal_error
+                .lock()
+                .ok()
+                .and_then(|value| value.clone());
+            return Err(detail.map_or(RunServiceError::LeaseHeld, RunServiceError::NonOperational));
         }
-        let (s, r) = self.repo()?.reserve_phase_run(p, t, phase, prompt)?;
+        Ok(())
+    }
+    pub fn start_current_phase(&mut self, p: &str, t: &str) -> Result<Run, RunServiceError> {
+        let connection = rusqlite::Connection::open(&self.database).map_err(RunError::Sql)?;
+        let (stage, work): (String, String) = connection.query_row(
+            "SELECT t.stage,p.work_dir FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.project_id=?1 AND t.id=?2",
+            rusqlite::params![p,t], |r| Ok((r.get(0)?,r.get(1)?))).map_err(RunError::Sql)?;
+        let phase = match stage.as_str() {
+            "defining" => Phase::Defining,
+            "implementation" => Phase::Implementation,
+            "reviewing" => Phase::Reviewing,
+            _ => {
+                return Err(RunServiceError::Policy(format!(
+                    "cannot start a run in {stage}"
+                )));
+            }
+        };
+        let prompt = build_prompt(phase, t, p, Path::new(&work));
+        self.ensure_operational()?;
+        let (session, run) = self.repo()?.reserve_phase_run(p, t, phase, &prompt)?;
         self.notice(RunNotice::Changed {
-            run_id: r.id.clone(),
+            run_id: run.id.clone(),
         });
-        self.launch(r, s.external_session_id.as_deref())
+        self.launch(run, session.external_session_id.as_deref())
     }
     pub fn follow_up(&mut self, sid: &str, prompt: &str) -> Result<Run, RunServiceError> {
         let mut repo = self.repo()?;
@@ -397,9 +421,7 @@ impl RunService {
                 "follow-up requires a terminal run".into(),
             ));
         }
-        if !self.operational.load(Ordering::Acquire) {
-            return Err(RunServiceError::LeaseHeld);
-        }
+        self.ensure_operational()?;
         let run = repo.reserve_run(&s, prompt, &last.work_dir)?;
         self.launch(run, Some(&ext))
     }
@@ -421,34 +443,28 @@ impl RunService {
                 return Err(e.into());
             }
         };
-        let child =
-            match self
-                .factory
+        let mut repo = self.repo()?;
+        let launch = repo.preflight_and_spawn(&run.id, &version, || {
+            self.factory
                 .spawn(&run.prompt, resume, &run.work_dir, &run.ownership_token)
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    self.repo()?.finish(
-                        &run.id,
-                        RunState::Failed,
-                        None,
-                        "",
-                        None,
-                        Some(&e.to_string()),
-                    )?;
-                    self.notice(RunNotice::Changed {
-                        run_id: run.id.clone(),
-                    });
-                    return Err(e.into());
-                }
-            };
-        let pid = child.id();
-        let running = match self.repo()?.mark_running(&run.id, pid, Some(&version)) {
-            Ok(r) => r,
-            Err(e) => {
-                cleanup_unowned_handoff(child, self.signals.as_ref());
+        });
+        let (running, child) = match launch {
+            Ok(value) => value,
+            Err(RunError::Io(e)) => {
+                self.repo()?.finish(
+                    &run.id,
+                    RunState::Failed,
+                    None,
+                    "",
+                    None,
+                    Some(&e.to_string()),
+                )?;
+                self.notice(RunNotice::Changed {
+                    run_id: run.id.clone(),
+                });
                 return Err(e.into());
             }
+            Err(e) => return Err(e.into()),
         };
         let (tx, rx) = mpsc::channel();
         let id = run.id.clone();
@@ -457,6 +473,8 @@ impl RunService {
         let broker = self.broker.clone();
         let clock = self.clock.clone();
         let signals = self.signals.clone();
+        let operational = self.operational.clone();
+        let terminal_error = self.terminal_error.clone();
         let session = run.session_id.clone();
         let join = thread::spawn(move || {
             controller_loop(
@@ -468,6 +486,8 @@ impl RunService {
                 &broker,
                 clock.as_ref(),
                 signals.as_ref(),
+                &operational,
+                &terminal_error,
             )
         });
         self.controllers
@@ -488,9 +508,7 @@ impl RunService {
         Ok(running)
     }
     pub fn stop_run(&mut self, id: &str) -> Result<Run, RunServiceError> {
-        if !self.operational.load(Ordering::Acquire) {
-            return Err(RunServiceError::LeaseHeld);
-        }
+        self.ensure_operational()?;
         let run = self.repo()?.get_run(id)?;
         if !matches!(run.state, RunState::Queued | RunState::Running) {
             return Ok(run);
@@ -578,7 +596,7 @@ impl RunService {
                     )));
                 }
             }
-            repo.finish(
+            repo.finish_with_transition(
                 &run.id,
                 RunState::Interrupted,
                 None,
@@ -597,10 +615,6 @@ impl Drop for RunService {
     }
 }
 
-fn cleanup_unowned_handoff(mut child: Child, signals: &dyn ProcessSignals) {
-    signals.kill_group(child.id());
-    let _ = child.wait();
-}
 #[allow(clippy::too_many_arguments)]
 fn controller_loop(
     mut child: Child,
@@ -611,6 +625,8 @@ fn controller_loop(
     broker: &Arc<Mutex<NoticeBroker>>,
     clock: &dyn ControllerClock,
     signals: &dyn ProcessSignals,
+    operational: &Arc<AtomicBool>,
+    terminal_error: &Arc<Mutex<Option<String>>>,
 ) {
     let mut stdout = child.stdout.take().unwrap();
     let mut stderr = child.stderr.take().unwrap();
@@ -811,19 +827,46 @@ fn controller_loop(
             ),
             Err(e) => (RunState::Failed, None, Some(e.to_string())),
         };
-        if repo
-            .finish(
+        let mut finish = repo.finish_with_transition(
+            id,
+            state,
+            code,
+            &stderr,
+            final_result.as_deref(),
+            error.as_deref(),
+        );
+        for attempt in 0..5 {
+            if finish.is_ok() {
+                break;
+            }
+            if !matches!(&finish, Err(RunError::Sql(rusqlite::Error::SqliteFailure(e, _))) if e.code == rusqlite::ErrorCode::DatabaseBusy || e.code == rusqlite::ErrorCode::DatabaseLocked)
+            {
+                break;
+            }
+            clock.wait(Duration::from_millis(20 * (attempt + 1)));
+            finish = repo.finish_with_transition(
                 id,
                 state,
                 code,
                 &stderr,
                 final_result.as_deref(),
                 error.as_deref(),
-            )
-            .is_ok()
-            && let Ok(mut b) = broker.lock()
-        {
-            b.publish(RunNotice::Changed { run_id: id.into() });
+            );
+        }
+        match finish {
+            Ok(_) => {
+                if let Ok(mut b) = broker.lock() {
+                    b.publish(RunNotice::Changed { run_id: id.into() });
+                }
+            }
+            Err(failure) => {
+                operational.store(false, Ordering::Release);
+                if let Ok(mut slot) = terminal_error.lock() {
+                    *slot = Some(format!(
+                        "terminal persistence failed for run {id}: {failure}"
+                    ));
+                }
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod app_paths;
+pub mod automation;
 pub mod documents;
 pub mod domain;
 pub mod harness;

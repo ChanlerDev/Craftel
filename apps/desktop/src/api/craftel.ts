@@ -1,4 +1,4 @@
-import type { Document, DocumentProjectStatus, DocumentRevision, ExpectedDocumentState, Project, Stage, Task, Phase, PhaseSession, Run, RunEvent } from "./types";
+import type { Document, DocumentProjectStatus, DocumentRevision, ExpectedDocumentState, Project, Stage, Task, PhaseSession, Run, RunEvent } from "./types";
 
 export interface CraftelApi {
   listProjects(): Promise<Project[]>;
@@ -17,8 +17,8 @@ export interface CraftelApi {
   writeDocument(projectId:string,path:string,content:string,expectedState:ExpectedDocumentState):Promise<Document>;
   listDocumentRevisions(projectId:string,path:string):Promise<DocumentRevision[]>;
   restoreDocumentRevision(projectId:string,path:string,snapshotId:string,expectedState:ExpectedDocumentState):Promise<Document>;
-  startPhaseRun(projectId:string,taskId:string,phase:Phase,prompt:string,workDir:string):Promise<Run>;
-  stopRun(runId:string):Promise<Run>; followUp(sessionId:string,prompt:string):Promise<Run>;
+  startCurrentPhase(projectId:string,taskId:string):Promise<Run>;
+  stopRun(runId:string):Promise<Run>;
   getSession(sessionId:string):Promise<PhaseSession>; listSessions(projectId:string,taskId:string):Promise<PhaseSession[]>;
   listRuns(sessionId:string):Promise<Run[]>; getRun(runId:string):Promise<Run>; listRunEvents(runId:string,afterSequence:number,limit:number):Promise<RunEvent[]>;
 }
