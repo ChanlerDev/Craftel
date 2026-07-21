@@ -13,6 +13,9 @@ const DOCUMENT_MIGRATION: &str = include_str!("../../migrations/002_documents.sq
 const DOCUMENT_HARDENING_MIGRATION: &str =
     include_str!("../../migrations/003_document_hardening.sql");
 const DOCUMENT_STATUS_MIGRATION: &str = include_str!("../../migrations/004_document_status.sql");
+const HARNESS_MIGRATION: &str = include_str!("../../migrations/005_harness.sql");
+const SUPERVISOR_HARDENING_MIGRATION: &str =
+    include_str!("../../migrations/006_supervisor_hardening.sql");
 
 pub struct NewTask {
     pub project_id: String,
@@ -78,6 +81,8 @@ impl SqliteRepository {
             connection.execute_batch(DOCUMENT_HARDENING_MIGRATION)?;
         }
         connection.execute_batch(DOCUMENT_STATUS_MIGRATION)?;
+        connection.execute_batch(HARNESS_MIGRATION)?;
+        connection.execute_batch(SUPERVISOR_HARDENING_MIGRATION)?;
         Ok(Self { connection })
     }
 

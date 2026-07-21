@@ -3,6 +3,7 @@ use std::{fmt::Display, path::PathBuf};
 use craftel_core::{
     documents::{Document, DocumentProjectStatus, DocumentSnapshot, ExpectedDocumentState},
     domain::{Project, Stage, Task},
+    runs::{Phase, PhaseSession, Run, RunEvent},
 };
 use serde::Serialize;
 use tauri::State;
@@ -19,6 +20,78 @@ pub enum IpcErrorCode {
     InvalidUtf8,
     Validation,
     Io,
+}
+
+fn with_runs<T>(
+    state: &AppState,
+    operation: impl FnOnce(
+        &mut craftel_core::run_service::RunService,
+    ) -> Result<T, craftel_core::run_service::RunServiceError>,
+) -> Result<T, IpcError> {
+    let mut runs = state
+        .runs
+        .lock()
+        .map_err(|_| IpcError::from_display("run supervisor unavailable"))?;
+    operation(&mut runs).map_err(IpcError::from_display)
+}
+
+#[tauri::command]
+pub fn start_phase_run(
+    state: State<'_, AppState>,
+    project_id: String,
+    task_id: String,
+    phase: Phase,
+    prompt: String,
+) -> Result<Run, IpcError> {
+    with_runs(&state, |s| {
+        s.start_phase_run(&project_id, &task_id, phase, &prompt)
+    })
+}
+#[tauri::command]
+pub fn stop_run(state: State<'_, AppState>, run_id: String) -> Result<Run, IpcError> {
+    with_runs(&state, |s| s.stop_run(&run_id))
+}
+#[tauri::command]
+pub fn follow_up(
+    state: State<'_, AppState>,
+    session_id: String,
+    prompt: String,
+) -> Result<Run, IpcError> {
+    with_runs(&state, |s| s.follow_up(&session_id, &prompt))
+}
+#[tauri::command]
+pub fn get_session(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<PhaseSession, IpcError> {
+    with_runs(&state, |s| s.get_session(&session_id))
+}
+#[tauri::command]
+pub fn list_sessions(
+    state: State<'_, AppState>,
+    project_id: String,
+    task_id: String,
+) -> Result<Vec<PhaseSession>, IpcError> {
+    with_runs(&state, |s| s.list_sessions(&project_id, &task_id))
+}
+#[tauri::command]
+pub fn list_runs(state: State<'_, AppState>, session_id: String) -> Result<Vec<Run>, IpcError> {
+    with_runs(&state, |s| s.list_runs(&session_id))
+}
+#[tauri::command]
+pub fn get_run(state: State<'_, AppState>, run_id: String) -> Result<Run, IpcError> {
+    with_runs(&state, |s| s.get_run(&run_id))
+}
+#[tauri::command]
+pub fn list_run_events(
+    state: State<'_, AppState>,
+    run_id: String,
+    after_sequence: i64,
+    limit: usize,
+) -> Result<Vec<RunEvent>, IpcError> {
+    with_runs(&state, |s| {
+        s.list_run_events(&run_id, after_sequence, limit)
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

@@ -114,6 +114,7 @@ impl DocumentRepository {
         c.busy_timeout(std::time::Duration::from_secs(5))?;
         c.pragma_update(None, "foreign_keys", true)?;
         c.execute_batch(MIGRATIONS)?;
+        c.execute_batch(include_str!("../../migrations/005_harness.sql"))?;
         if !column_exists(&c, "document_snapshots", "sequence")? {
             c.execute_batch(include_str!("../../migrations/003_document_hardening.sql"))?;
         }

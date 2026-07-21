@@ -15,3 +15,8 @@ export interface DocumentRevision { id:string; project_id:string; relative_path:
 export interface DocumentChanged { project_id:string; path:string; change:string; }
 export interface DocumentProjectStatus { project_id:string; state:"healthy"|"error"; error:string|null; updated_at:string; }
 export type ExpectedDocumentState = {state:"present";hash:string}|{state:"missing"};
+export type Phase="defining"|"implementation"|"reviewing";
+export type RunState="queued"|"running"|"succeeded"|"failed"|"stopped"|"interrupted";
+export interface PhaseSession {id:string;project_id:string;task_id:string;phase:Phase;harness:string;external_session_id:string|null;created_at:string;updated_at:string}
+export interface Run {id:string;session_id:string;project_id:string;task_id:string;sequence:number;state:RunState;prompt:string;harness:string;harness_version:string|null;model:string|null;work_dir:string;request_id:string|null;pid:number|null;ownership_token:string;started_at:string|null;finished_at:string|null;exit_code:number|null;stderr:string;final_result:string|null;stop_requested_at:string|null;error:string|null;created_at:string;updated_at:string}
+export interface RunEvent {run_id:string;sequence:number;kind:string;event_at:string;display_text:string|null;tool_name:string|null;tool_call_id:string|null;raw_json:string}

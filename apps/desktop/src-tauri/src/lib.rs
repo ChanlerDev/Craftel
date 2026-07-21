@@ -34,6 +34,14 @@ pub fn run() {
             write_document,
             list_document_revisions,
             restore_document_revision,
+            start_phase_run,
+            stop_run,
+            follow_up,
+            get_session,
+            list_sessions,
+            list_runs,
+            get_run,
+            list_run_events,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CRAFTEL");
