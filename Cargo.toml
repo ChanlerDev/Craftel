@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/craftel-core",
+    "crates/craftel-cli",
+    "apps/desktop/src-tauri",
+]
+resolver = "2"

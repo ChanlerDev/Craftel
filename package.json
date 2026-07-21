@@ -1,0 +1,10 @@
+{
+  "name": "craftel",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "check": "pnpm check:rust && pnpm check:web",
+    "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+    "check:web": "pnpm --filter @craftel/desktop test && pnpm --filter @craftel/desktop build"
+  }
+}

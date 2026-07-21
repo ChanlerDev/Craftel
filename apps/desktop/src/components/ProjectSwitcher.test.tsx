@@ -1,0 +1,9 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { vi } from "vitest";
+import { ProjectSwitcher } from "./ProjectSwitcher";
+import { fakeApi, project } from "../test/fake";
+
+test("loads and switches registered projects through openProject", async () => { const a = project(), b = project({ id: "p2", name: "Beta" }); const api = fakeApi({ listProjects: vi.fn().mockResolvedValue([a, b]), openProject: vi.fn().mockResolvedValue(b) }); const select = vi.fn(); render(<ProjectSwitcher api={api} selected={a} onSelect={select} />); await userEvent.click(await screen.findByRole("button", { name: "Beta" })); expect(api.openProject).toHaveBeenCalledWith("p2"); expect(select).toHaveBeenCalledWith(b); });
+test("selects and registers a directory", async () => { const p = project(); vi.spyOn(window, "prompt").mockReturnValue("Alpha"); const api = fakeApi({ selectProjectDirectory: vi.fn().mockResolvedValue("/tmp/alpha"), registerProject: vi.fn().mockResolvedValue(p), openProject: vi.fn().mockResolvedValue(p) }); render(<ProjectSwitcher api={api} selected={null} onSelect={vi.fn()} />); await userEvent.click(screen.getByRole("button", { name: "Open Project" })); await waitFor(() => expect(api.registerProject).toHaveBeenCalledWith("Alpha", "/tmp/alpha")); });
+test("shows and removes a missing registration without a file operation", async () => { const p = project({ available: false }); const api = fakeApi({ listProjects: vi.fn().mockResolvedValueOnce([p]).mockResolvedValue([]), removeProject: vi.fn().mockResolvedValue(undefined) }); render(<ProjectSwitcher api={api} selected={p} onSelect={vi.fn()} />); expect(await screen.findByText("Directory missing")).toBeInTheDocument(); await userEvent.click(screen.getByRole("button", { name: /Remove Registration/ })); expect(api.removeProject).toHaveBeenCalledWith("p1"); });

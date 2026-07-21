@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$(uname -s)" == "Linux" ]] && command -v apt-get >/dev/null; then
+  sudo apt-get update
+  sudo apt-get install -y --no-install-recommends \
+    build-essential curl file libayatana-appindicator3-dev librsvg2-dev \
+    libssl-dev libwebkit2gtk-4.1-dev xz-utils
+fi
+
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+if ! command -v cargo >/dev/null; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --profile minimal --default-toolchain stable
+fi
+mkdir -p "$HOME/.local/bin"
+for tool in cargo rustc rustfmt rustup; do
+  ln -sfn "$HOME/.cargo/bin/$tool" "$HOME/.local/bin/$tool"
+done
+
+# Vite 7 requires Node 20.19+ or 22.12+. Install an isolated LTS runtime when
+# the orb image does not provide a compatible Node. The archive is verified
+# against Node's published checksums and does not modify the system runtime.
+node_ok=false
+if command -v node >/dev/null; then
+  node_major="$(node -p 'process.versions.node.split(".")[0]')"
+  node_minor="$(node -p 'process.versions.node.split(".")[1]')"
+  if (( node_major > 22 || node_major == 22 && node_minor >= 12 || node_major == 20 && node_minor >= 19 )); then
+    node_ok=true
+  fi
+fi
+if [[ "$node_ok" != true ]]; then
+  node_version="22.17.1"
+  case "$(uname -m)" in
+    x86_64) node_arch="x64" ;;
+    aarch64|arm64) node_arch="arm64" ;;
+    *) echo "Unsupported Node architecture: $(uname -m)" >&2; exit 1 ;;
+  esac
+  node_dir="$HOME/.local/node-v${node_version}-linux-${node_arch}"
+  if [[ ! -x "$node_dir/bin/node" ]]; then
+    archive="node-v${node_version}-linux-${node_arch}.tar.xz"
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    curl --proto '=https' --tlsv1.2 -fsSLo "$tmp/$archive" "https://nodejs.org/dist/v${node_version}/$archive"
+    curl --proto '=https' --tlsv1.2 -fsSLo "$tmp/SHASUMS256.txt" "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt"
+    (cd "$tmp" && grep "  $archive\$" SHASUMS256.txt | sha256sum --check -)
+    mkdir -p "$HOME/.local"
+    tar -xJf "$tmp/$archive" -C "$HOME/.local"
+  fi
+  export PATH="$node_dir/bin:$PATH"
+  for tool in node npm npx corepack; do
+    ln -sfn "$node_dir/bin/$tool" "$HOME/.local/bin/$tool"
+  done
+fi
+
+if ! command -v corepack >/dev/null; then
+  npm install --global corepack@0.33.0
+fi
+corepack enable --install-directory "$HOME/.local/bin"
+export PATH="$HOME/.local/bin:$PATH"
+if [[ -f pnpm-lock.yaml ]]; then
+  corepack pnpm install --frozen-lockfile
+else
+  corepack pnpm install
+fi
