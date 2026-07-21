@@ -9,6 +9,10 @@ use crate::domain::{Project, Stage, Task, WorkflowAction};
 use super::StorageError;
 
 const MIGRATION: &str = include_str!("../../migrations/001_foundation.sql");
+const DOCUMENT_MIGRATION: &str = include_str!("../../migrations/002_documents.sql");
+const DOCUMENT_HARDENING_MIGRATION: &str =
+    include_str!("../../migrations/003_document_hardening.sql");
+const DOCUMENT_STATUS_MIGRATION: &str = include_str!("../../migrations/004_document_status.sql");
 
 pub struct NewTask {
     pub project_id: String,
@@ -69,6 +73,11 @@ impl SqliteRepository {
             ));
         }
         connection.execute_batch(MIGRATION)?;
+        connection.execute_batch(DOCUMENT_MIGRATION)?;
+        if !column_exists(&connection, "document_snapshots", "sequence")? {
+            connection.execute_batch(DOCUMENT_HARDENING_MIGRATION)?;
+        }
+        connection.execute_batch(DOCUMENT_STATUS_MIGRATION)?;
         Ok(Self { connection })
     }
 
@@ -245,6 +254,12 @@ impl SqliteRepository {
             .optional()?
             .ok_or(StorageError::NotFound)
     }
+}
+
+fn column_exists(connection: &Connection, table: &str, column: &str) -> Result<bool, StorageError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    Ok(rows.filter_map(Result::ok).any(|name| name == column))
 }
 
 fn timestamp(value: DateTime<Utc>) -> String {

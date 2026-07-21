@@ -10,7 +10,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             use tauri::Manager;
-            app.manage(AppState::open().map_err(|error| error.message)?);
+            let mut state = AppState::open().map_err(|error| error.message)?;
+            state.start_document_dispatcher(app.handle().clone());
+            app.manage(state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -25,6 +27,13 @@ pub fn run() {
             next_task,
             pass_task,
             fail_task,
+            list_documents,
+            document_status,
+            read_document,
+            search_documents,
+            write_document,
+            list_document_revisions,
+            restore_document_revision,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CRAFTEL");

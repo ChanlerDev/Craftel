@@ -18,4 +18,5 @@ export const mockApi: CraftelApi = {
   createTask: async (projectId, title, content) => { const task: Task = { ...tasks[0], id: `T${String(tasks.length + 1).padStart(4, "0")}`, project_id: projectId, title, content, stage: "inbox", updated_at: now }; tasks = [...tasks, task]; return task; },
   updateTask: async (_p, id, title, content) => { const task = { ...tasks.find(t => t.id === id)!, title, content, updated_at: now }; tasks = tasks.map(t => t.id === id ? task : t); return task; },
   moveTask: async (_p, id, stage) => { const task = { ...tasks.find(t => t.id === id)!, stage, updated_at: now }; tasks = tasks.map(t => t.id === id ? task : t); return task; },
+  listDocuments:async()=>[],documentStatus:async()=>({project_id:project.id,state:"healthy",error:null,updated_at:now}),readDocument:async()=>{throw new Error("not found")},searchDocuments:async()=>[],writeDocument:async()=>{throw new Error("not found")},listDocumentRevisions:async()=>[],restoreDocumentRevision:async()=>{throw new Error("not found")},
 };

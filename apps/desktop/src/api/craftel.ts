@@ -1,4 +1,4 @@
-import type { Project, Stage, Task } from "./types";
+import type { Document, DocumentProjectStatus, DocumentRevision, ExpectedDocumentState, Project, Stage, Task } from "./types";
 
 export interface CraftelApi {
   listProjects(): Promise<Project[]>;
@@ -10,6 +10,13 @@ export interface CraftelApi {
   createTask(projectId: string, title: string, content: string): Promise<Task>;
   updateTask(projectId: string, taskId: string, title: string, content: string): Promise<Task>;
   moveTask(projectId: string, taskId: string, stage: Stage): Promise<Task>;
+  listDocuments(projectId:string, includeDeleted?:boolean):Promise<Document[]>;
+  documentStatus(projectId:string):Promise<DocumentProjectStatus>;
+  readDocument(projectId:string,path:string):Promise<Document>;
+  searchDocuments(projectId:string,query:string):Promise<Document[]>;
+  writeDocument(projectId:string,path:string,content:string,expectedState:ExpectedDocumentState):Promise<Document>;
+  listDocumentRevisions(projectId:string,path:string):Promise<DocumentRevision[]>;
+  restoreDocumentRevision(projectId:string,path:string,snapshotId:string,expectedState:ExpectedDocumentState):Promise<Document>;
 }
 
 export function errorMessage(error: unknown): string {

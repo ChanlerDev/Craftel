@@ -1,20 +1,58 @@
 use std::{fmt::Display, path::PathBuf};
 
-use craftel_core::domain::{Project, Stage, Task};
+use craftel_core::{
+    documents::{Document, DocumentProjectStatus, DocumentSnapshot, ExpectedDocumentState},
+    domain::{Project, Stage, Task},
+};
 use serde::Serialize;
 use tauri::State;
 
 use crate::state::AppState;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpcErrorCode {
+    Conflict,
+    Unavailable,
+    NotFound,
+    InvalidPath,
+    InvalidUtf8,
+    Validation,
+    Io,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct IpcError {
     pub message: String,
+    pub code: IpcErrorCode,
 }
 
 impl IpcError {
     pub(crate) fn from_display(error: impl Display) -> Self {
         Self {
             message: error.to_string(),
+            code: IpcErrorCode::Io,
+        }
+    }
+    fn from_service(error: craftel_core::ServiceError) -> Self {
+        use craftel_core::{ServiceError, documents::DocumentError};
+        let code = match &error {
+            ServiceError::Conflict | ServiceError::Document(DocumentError::Conflict) => {
+                IpcErrorCode::Conflict
+            }
+            ServiceError::Unavailable => IpcErrorCode::Unavailable,
+            ServiceError::Document(DocumentError::NotFound)
+            | ServiceError::Storage(craftel_core::storage::StorageError::NotFound) => {
+                IpcErrorCode::NotFound
+            }
+            ServiceError::Document(DocumentError::InvalidPath) => IpcErrorCode::InvalidPath,
+            ServiceError::Document(DocumentError::InvalidUtf8) => IpcErrorCode::InvalidUtf8,
+            ServiceError::Validation(_) => IpcErrorCode::Validation,
+            _ => IpcErrorCode::Io,
+        };
+        Self {
+            message: error.to_string(),
+            code,
         }
     }
 }
@@ -27,7 +65,7 @@ fn with_service<T>(
         .service
         .lock()
         .map_err(|_| IpcError::from_display("CRAFTEL service state is unavailable"))?;
-    operation(&mut service).map_err(IpcError::from_display)
+    operation(&mut service).map_err(IpcError::from_service)
 }
 
 #[tauri::command]
@@ -113,6 +151,72 @@ transition_command!(next_task);
 transition_command!(pass_task);
 transition_command!(fail_task);
 
+#[tauri::command]
+pub fn list_documents(
+    state: State<'_, AppState>,
+    project_id: String,
+    include_deleted: bool,
+) -> Result<Vec<Document>, IpcError> {
+    with_service(&state, |s| s.list_documents(&project_id, include_deleted))
+}
+#[tauri::command]
+pub fn document_status(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<DocumentProjectStatus, IpcError> {
+    with_service(&state, |s| s.document_status(&project_id))
+}
+#[tauri::command]
+pub fn read_document(
+    state: State<'_, AppState>,
+    project_id: String,
+    path: String,
+) -> Result<Document, IpcError> {
+    with_service(&state, |s| s.read_document(&project_id, &path))
+}
+#[tauri::command]
+pub fn search_documents(
+    state: State<'_, AppState>,
+    project_id: String,
+    query: String,
+) -> Result<Vec<Document>, IpcError> {
+    with_service(&state, |s| s.search_documents(&project_id, &query))
+}
+#[tauri::command]
+pub fn list_document_revisions(
+    state: State<'_, AppState>,
+    project_id: String,
+    path: String,
+) -> Result<Vec<DocumentSnapshot>, IpcError> {
+    with_service(&state, |s| s.list_document_revisions(&project_id, &path))
+}
+#[tauri::command]
+pub fn write_document(
+    state: State<'_, AppState>,
+    project_id: String,
+    path: String,
+    content: String,
+    expected_state: ExpectedDocumentState,
+) -> Result<Document, IpcError> {
+    let d = with_service(&state, |s| {
+        s.write_document(&project_id, &path, &content, expected_state)
+    })?;
+    Ok(d)
+}
+#[tauri::command]
+pub fn restore_document_revision(
+    state: State<'_, AppState>,
+    project_id: String,
+    path: String,
+    snapshot_id: String,
+    expected_state: ExpectedDocumentState,
+) -> Result<Document, IpcError> {
+    let d = with_service(&state, |s| {
+        s.restore_document_revision(&project_id, &path, &snapshot_id, expected_state)
+    })?;
+    Ok(d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,7 +247,22 @@ mod tests {
         let error = IpcError::from_display("safe message");
         assert_eq!(
             serde_json::to_value(error).unwrap(),
-            serde_json::json!({"message": "safe message"})
+            serde_json::json!({"message": "safe message", "code": "io"})
+        );
+    }
+
+    #[test]
+    fn document_change_hint_has_the_typed_desktop_shape() {
+        let hint = craftel_core::documents::DocumentChanged {
+            project_id: "P1".into(),
+            path: "craftel/INDEX.md".into(),
+            change: craftel_core::documents::DocumentChange::Delete,
+        };
+        assert_eq!(
+            serde_json::to_value(hint).unwrap(),
+            serde_json::json!({
+                "project_id": "P1", "path": "craftel/INDEX.md", "change": "delete"
+            })
         );
     }
 }
