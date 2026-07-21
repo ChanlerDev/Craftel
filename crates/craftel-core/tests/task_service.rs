@@ -1,4 +1,10 @@
-use craftel_core::{CraftelService, domain::Stage, storage::SqliteRepository};
+use craftel_core::{
+    CraftelService,
+    automation::build_prompt,
+    domain::Stage,
+    runs::{Phase, RunRepository},
+    storage::SqliteRepository,
+};
 use std::fs;
 use tempfile::TempDir;
 
@@ -129,4 +135,47 @@ fn opening_skips_unavailable_projects() {
     fs::remove_dir_all(work).unwrap();
     let service = CraftelService::open(&db).unwrap();
     assert!(!service.list_projects().unwrap()[0].available);
+}
+
+#[test]
+fn active_runs_block_manual_stage_changes() {
+    let (root, db, project) = setup();
+    let mut service = CraftelService::open(&db).unwrap();
+    let task = service.create_task(&project, "Title", "content").unwrap();
+    service
+        .move_task(&project, &task.id, Stage::Defining)
+        .unwrap();
+    let prompt = build_prompt(
+        Phase::Defining,
+        &task.id,
+        &project,
+        &root.path().join("project"),
+    );
+    RunRepository::open(&db)
+        .unwrap()
+        .reserve_phase_run(&project, &task.id, Phase::Defining, &prompt)
+        .unwrap();
+
+    assert!(
+        service
+            .apply(
+                &project,
+                &task.id,
+                craftel_core::domain::WorkflowAction::Move(Stage::Implementation),
+            )
+            .is_err()
+    );
+    assert!(
+        service
+            .apply(
+                &project,
+                &task.id,
+                craftel_core::domain::WorkflowAction::Next,
+            )
+            .is_err()
+    );
+    assert_eq!(
+        service.get_task(&project, &task.id).unwrap().stage,
+        Stage::Defining
+    );
 }

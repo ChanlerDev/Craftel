@@ -10,6 +10,8 @@ pub enum StorageError {
     InvalidData(String),
     #[error("project or task was not found")]
     NotFound,
+    #[error("task has an active run")]
+    ActiveRun,
     #[error("application data directory is unavailable")]
     ApplicationDataDirectoryUnavailable,
     #[error(transparent)]

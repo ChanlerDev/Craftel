@@ -48,6 +48,14 @@ pub fn stop_run(state: State<'_, AppState>, run_id: String) -> Result<Run, IpcEr
     with_runs(&state, |s| s.stop_run(&run_id))
 }
 #[tauri::command]
+pub fn follow_up(
+    state: State<'_, AppState>,
+    session_id: String,
+    prompt: String,
+) -> Result<Run, IpcError> {
+    with_runs(&state, |s| s.follow_up(&session_id, &prompt))
+}
+#[tauri::command]
 pub fn get_session(
     state: State<'_, AppState>,
     session_id: String,
@@ -65,6 +73,13 @@ pub fn list_sessions(
 #[tauri::command]
 pub fn list_runs(state: State<'_, AppState>, session_id: String) -> Result<Vec<Run>, IpcError> {
     with_runs(&state, |s| s.list_runs(&session_id))
+}
+#[tauri::command]
+pub fn list_active_runs(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<Vec<Run>, IpcError> {
+    with_runs(&state, |s| s.list_active_runs(&project_id))
 }
 #[tauri::command]
 pub fn get_run(state: State<'_, AppState>, run_id: String) -> Result<Run, IpcError> {
@@ -325,5 +340,28 @@ mod tests {
                 "project_id": "P1", "path": "craftel/INDEX.md", "change": "delete"
             })
         );
+    }
+
+    #[test]
+    fn expected_document_states_have_the_desktop_wire_shape() {
+        assert_eq!(
+            serde_json::to_value(ExpectedDocumentState::Missing).unwrap(),
+            serde_json::json!({"state": "missing"})
+        );
+        assert_eq!(
+            serde_json::to_value(ExpectedDocumentState::Present("abc".into())).unwrap(),
+            serde_json::json!({"state": "present", "hash": "abc"})
+        );
+    }
+
+    #[test]
+    fn run_event_has_the_typed_stream_wire_shape() {
+        let expected = serde_json::json!({
+            "run_id":"R1", "sequence":7, "kind":"tool_complete",
+            "event_at":"2026-07-21T12:00:00Z", "display_text":"done",
+            "tool_name":"Shell", "tool_call_id":"call-1", "raw_json":"{}"
+        });
+        let event: RunEvent = serde_json::from_value(expected.clone()).unwrap();
+        assert_eq!(serde_json::to_value(event).unwrap(), expected);
     }
 }

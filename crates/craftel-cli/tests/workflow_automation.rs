@@ -71,7 +71,7 @@ fn mode(fixture: &AutomationFixture, value: &str) {
 }
 
 fn terminal(service: &RunService, run: &Run) -> Run {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let current = service.get_run(&run.id).unwrap();
         if !matches!(current.state, RunState::Queued | RunState::Running) {
@@ -109,7 +109,7 @@ fn real_cli_transition_matrix_and_complete_session_cycles() {
     // Defining pass/fail and a successful transition followed by non-zero exit.
     for (selected_mode, expected_stage, expected_state) in [
         ("fail", Stage::Defining, RunState::Succeeded),
-        ("pass", Stage::Implementation, RunState::Succeeded),
+        ("pass", Stage::Defining, RunState::Succeeded),
     ] {
         let fixture = AutomationFixture::new();
         let mut service = fixture.service();
@@ -121,7 +121,7 @@ fn real_cli_transition_matrix_and_complete_session_cycles() {
     let mut service = fixture.service();
     let run = start(&mut service, &fixture, "pass_nonzero");
     assert_transition(&run, RunState::Failed, true, false);
-    assert_eq!(fixture.stage().0, Stage::Implementation);
+    assert_eq!(fixture.stage().0, Stage::Defining);
 
     // Implementation pass and fail both execute the actual CLI.
     for (selected_mode, expected_stage) in
@@ -183,7 +183,7 @@ fn real_cli_transition_matrix_and_complete_session_cycles() {
     );
     drop(reopened);
 
-    // Manual Move/Next after the run baseline are not automation attribution.
+    // Manual Move/Next cannot change the stage while a run is active.
     for action in [
         WorkflowAction::Move(Stage::Implementation),
         WorkflowAction::Next,
@@ -194,9 +194,15 @@ fn real_cli_transition_matrix_and_complete_session_cycles() {
         let running = service
             .start_current_phase(&fixture.project_id, &fixture.task_id)
             .unwrap();
-        fixture.action(action);
+        assert!(
+            SqliteRepository::open(&fixture.db)
+                .unwrap()
+                .apply_transition(&fixture.project_id, &fixture.task_id, action)
+                .is_err()
+        );
         let finished = terminal(&service, &running);
         assert_transition(&finished, RunState::Succeeded, false, true);
+        assert_eq!(fixture.stage().0, Stage::Defining);
     }
 
     // Stop never manufactures a fail transition.

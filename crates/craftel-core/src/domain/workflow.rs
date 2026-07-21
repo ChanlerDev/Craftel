@@ -38,7 +38,7 @@ impl Stage {
 
     pub fn pass(self) -> Result<Transition, WorkflowError> {
         match self {
-            Self::Defining => Ok(Transition::Move(Self::Implementation)),
+            Self::Defining => Ok(Transition::Stay),
             Self::Implementation => Ok(Transition::Move(Self::Reviewing)),
             Self::Reviewing => Ok(Transition::ReviewApproved),
             _ => Err(WorkflowError::InvalidAction {
@@ -77,7 +77,7 @@ impl Stage {
             WorkflowAction::Pass => match self.pass()? {
                 Transition::Move(to) => Ok((to, WorkflowOutcome::Moved)),
                 Transition::ReviewApproved => Ok((self, WorkflowOutcome::ReviewApproved)),
-                Transition::Stay => unreachable!(),
+                Transition::Stay => Ok((self, WorkflowOutcome::Stayed)),
             },
             WorkflowAction::Fail => match self.fail()? {
                 Transition::Move(to) => Ok((to, WorkflowOutcome::PhaseFailed)),
@@ -149,10 +149,7 @@ mod tests {
     #[test]
     fn approved_transition_examples() {
         assert_eq!(Stage::Inbox.next(false), Ok(Stage::Defining));
-        assert_eq!(
-            Stage::Defining.pass(),
-            Ok(Transition::Move(Stage::Implementation))
-        );
+        assert_eq!(Stage::Defining.pass(), Ok(Transition::Stay));
         assert_eq!(
             Stage::Implementation.pass(),
             Ok(Transition::Move(Stage::Reviewing))
@@ -210,6 +207,10 @@ mod tests {
         assert_eq!(
             Stage::Defining.apply(WorkflowAction::Fail, false),
             Ok((Stage::Defining, WorkflowOutcome::PhaseFailed))
+        );
+        assert_eq!(
+            Stage::Defining.apply(WorkflowAction::Pass, false),
+            Ok((Stage::Defining, WorkflowOutcome::Stayed))
         );
         assert_eq!(
             Stage::Implementation.apply(WorkflowAction::Fail, false),

@@ -308,6 +308,20 @@ impl RunRepository {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let stage: String = tx
+            .query_row(
+                "SELECT stage FROM tasks WHERE project_id=?1 AND id=?2",
+                params![session.project_id, session.task_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(RunError::NotFound)?;
+        if stage != session.phase.as_str() {
+            return Err(RunError::Invalid(format!(
+                "task stage is {stage}, not {}",
+                session.phase.as_str()
+            )));
+        }
         let seq: i64 = tx.query_row(
             "SELECT COALESCE(MAX(sequence),0)+1 FROM runs WHERE session_id=?1",
             [&session.id],
@@ -480,6 +494,13 @@ impl RunRepository {
             "SELECT {RUN_COLUMNS} FROM runs WHERE session_id=?1 ORDER BY sequence"
         ))?;
         Ok(s.query_map([session], run_row)?.collect::<Result<_, _>>()?)
+    }
+
+    pub fn list_active_runs(&self, project: &str) -> Result<Vec<Run>, RunError> {
+        let mut statement = self.connection.prepare("SELECT id,session_id,project_id,task_id,sequence,state,prompt,harness,harness_version,model,work_dir,request_id,started_at,finished_at,exit_code,stderr,final_result,stop_requested_at,error,stage_at_start,workflow_event_id_before,prompt_kind,prompt_version,observed_transition_event_id,missing_transition,created_at,updated_at FROM runs WHERE project_id=?1 AND state IN ('queued','running') ORDER BY created_at")?;
+        Ok(statement
+            .query_map([project], run_row)?
+            .collect::<Result<_, _>>()?)
     }
     pub fn stale_runs(&self) -> Result<Vec<Run>, RunError> {
         let mut s = self.connection.prepare(&format!(

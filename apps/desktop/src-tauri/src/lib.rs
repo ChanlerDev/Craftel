@@ -36,9 +36,11 @@ pub fn run() {
             restore_document_revision,
             start_current_phase,
             stop_run,
+            follow_up,
             get_session,
             list_sessions,
             list_runs,
+            list_active_runs,
             get_run,
             list_run_events,
         ])

@@ -16,6 +16,7 @@ fn review_pass_waits_for_human_next_and_fail_returns_to_implementation() {
     for action in [
         WorkflowAction::Next,
         WorkflowAction::Pass,
+        WorkflowAction::Next,
         WorkflowAction::Pass,
     ] {
         repo.apply_transition(&project.id, &task.id, action)

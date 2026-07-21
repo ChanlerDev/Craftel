@@ -41,52 +41,48 @@ impl ProcessFactory for VersionBarrierFactory {
 }
 
 #[test]
-fn stage_changes_between_reservation_version_and_spawn_never_spawn_even_if_moved_back() {
-    for move_back in [false, true] {
-        let t = tempfile::tempdir().unwrap();
-        let db = t.path().join("db");
-        let work = t.path().join("work");
-        std::fs::create_dir(&work).unwrap();
-        let mut repo = SqliteRepository::open(&db).unwrap();
-        let p = repo.register_project("p", &work).unwrap();
-        let task = repo
-            .create_task(NewTask::new(&p.id, "t", "c", "task"))
-            .unwrap();
-        repo.apply_transition(&p.id, &task.id, WorkflowAction::Next)
-            .unwrap();
-        let entered = Arc::new(Barrier::new(2));
-        let release = Arc::new(Barrier::new(2));
-        let spawns = Arc::new(AtomicUsize::new(0));
-        let factory = Arc::new(VersionBarrierFactory {
-            entered: entered.clone(),
-            release: release.clone(),
-            spawns: spawns.clone(),
-        });
-        let db2 = db.clone();
-        let project = p.id.clone();
-        let task_id = task.id.clone();
-        let worker = std::thread::spawn(move || {
-            let mut service = RunService::open_with_seams(
-                &db2,
-                factory,
-                Arc::new(SystemProcessInspector),
-                Arc::new(SystemControllerClock),
-                Arc::new(SystemProcessSignals),
-            )
-            .unwrap();
-            service.start_current_phase(&project, &task_id)
-        });
-        entered.wait();
+fn queued_run_atomically_pins_the_task_stage_before_spawn() {
+    let t = tempfile::tempdir().unwrap();
+    let db = t.path().join("db");
+    let work = t.path().join("work");
+    std::fs::create_dir(&work).unwrap();
+    let mut repo = SqliteRepository::open(&db).unwrap();
+    let p = repo.register_project("p", &work).unwrap();
+    let task = repo
+        .create_task(NewTask::new(&p.id, "t", "c", "task"))
+        .unwrap();
+    repo.apply_transition(&p.id, &task.id, WorkflowAction::Next)
+        .unwrap();
+    let entered = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    let spawns = Arc::new(AtomicUsize::new(0));
+    let factory = Arc::new(VersionBarrierFactory {
+        entered: entered.clone(),
+        release: release.clone(),
+        spawns: spawns.clone(),
+    });
+    let db2 = db.clone();
+    let project = p.id.clone();
+    let task_id = task.id.clone();
+    let worker = std::thread::spawn(move || {
+        let mut service = RunService::open_with_seams(
+            &db2,
+            factory,
+            Arc::new(SystemProcessInspector),
+            Arc::new(SystemControllerClock),
+            Arc::new(SystemProcessSignals),
+        )
+        .unwrap();
+        service.start_current_phase(&project, &task_id)
+    });
+    entered.wait();
+    assert!(
         repo.apply_transition(&p.id, &task.id, WorkflowAction::Move(Stage::Implementation))
-            .unwrap();
-        if move_back {
-            repo.apply_transition(&p.id, &task.id, WorkflowAction::Move(Stage::Defining))
-                .unwrap();
-        }
-        release.wait();
-        assert!(worker.join().unwrap().is_err());
-        assert_eq!(spawns.load(Ordering::SeqCst), 0);
-    }
+            .is_err()
+    );
+    release.wait();
+    assert!(worker.join().unwrap().is_ok());
+    assert_eq!(spawns.load(Ordering::SeqCst), 1);
 }
 #[test]
 fn fake_end_to_end_persists_and_resumes() {
@@ -128,9 +124,18 @@ fn fake_end_to_end_persists_and_resumes() {
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+    assert_eq!(
+        service.get_run(&follow.id).unwrap().state,
+        RunState::Succeeded
+    );
     assert!(
         std::fs::read_to_string(record.join("argv"))
             .unwrap()
             .contains("--resume=fake-session")
     );
+    SqliteRepository::open(&db)
+        .unwrap()
+        .apply_transition(&p.id, &task.id, WorkflowAction::Move(Stage::Implementation))
+        .unwrap();
+    assert!(service.follow_up(&run.session_id, "stale phase").is_err());
 }

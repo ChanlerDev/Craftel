@@ -563,6 +563,9 @@ impl RunService {
     pub fn list_runs(&self, s: &str) -> Result<Vec<Run>, RunServiceError> {
         Ok(self.repo()?.list_runs(s)?)
     }
+    pub fn list_active_runs(&self, project: &str) -> Result<Vec<Run>, RunServiceError> {
+        Ok(self.repo()?.list_active_runs(project)?)
+    }
     pub fn get_run(&self, id: &str) -> Result<Run, RunServiceError> {
         Ok(self.repo()?.get_run(id)?)
     }

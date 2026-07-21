@@ -1,5 +1,6 @@
 use craftel_core::{
     automation::{PROMPT_VERSION, build_prompt},
+    domain::WorkflowAction,
     runs::{EventKind, Phase, RunRepository, RunState},
     storage::{NewTask, SqliteRepository},
 };
@@ -53,6 +54,8 @@ fn durable_ordered_runs_and_terminal_immutability() {
     let p = base.register_project("p", &work).unwrap();
     let task = base
         .create_task(NewTask::new(&p.id, "t", "c", "task"))
+        .unwrap();
+    base.apply_transition(&p.id, &task.id, WorkflowAction::Next)
         .unwrap();
     drop(base);
     let mut r = RunRepository::open(&db).unwrap();

@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { tauriApi } from "./api/tauri";
 import type { CraftelApi } from "./api/craftel";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "./styles.css";
 
 let api: CraftelApi = tauriApi;

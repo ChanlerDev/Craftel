@@ -190,6 +190,12 @@ impl SqliteRepository {
         let tx = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if matches!(action, WorkflowAction::Move(_) | WorkflowAction::Next) {
+            let active: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM runs WHERE project_id=?1 AND task_id=?2 AND state IN ('queued','running'))", params![project_id,task_id], |row| row.get(0))?;
+            if active {
+                return Err(StorageError::ActiveRun);
+            }
+        }
         let mut task = tx.query_row("SELECT id,project_id,title,content,stage,relative_dir,review_approved,created_at,updated_at FROM tasks WHERE project_id=?1 AND id=?2", params![project_id,task_id], task_from_row).optional()?.ok_or(StorageError::NotFound)?;
         let event = task.apply_action(action, Utc::now())?;
         tx.execute("UPDATE tasks SET stage=?1,review_approved=?2,updated_at=?3,projection_dirty=1 WHERE project_id=?4 AND id=?5", params![task.stage.to_string(),task.review_approved,timestamp(task.updated_at),project_id,task_id])?;

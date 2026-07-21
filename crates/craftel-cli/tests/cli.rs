@@ -99,6 +99,10 @@ fn project_task_and_transition_workflows() {
         .args(["next", "T0001", "--project", &id])
         .assert()
         .success();
+    f.cmd()
+        .args(["pass", "T0001", "--project", &id])
+        .assert()
+        .success();
     let tasks = f
         .cmd()
         .args(["task", "list", "--project", &id, "--json"])
