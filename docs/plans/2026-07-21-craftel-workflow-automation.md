@@ -12,7 +12,7 @@
 - Every run records `stage_at_start`, `workflow_event_id_before`, prompt kind/version, and optional observed transition event ID. Workflow commands remain normal transactional service operations. A transition is attributable only when its workflow event occurs after launch, matches task and starting stage, and action is `pass` or `fail`; manual move/next does not satisfy it.
 - At terminal process exit, reconcile attribution transactionally. Exit success plus matching pass/fail is normal. Any exit without one leaves stage unchanged except for independently executed commands and exposes `missing_transition=true`. Non-zero/stop/interruption never synthesizes `fail`. A matching command remains authoritative even if the process later exits non-zero.
 - Start reserves the active run and snapshots stage in one immediate transaction; reject if task stage changes before spawn. During a run, workflow commands can execute from the child CLI through the shared SQLite database. Start and transition transactions serialize under existing busy timeout; no global GUI process is required.
-- Review `pass` records approval and remains Reviewing; human `next` alone advances approved review to Done. Review `fail` records changes requested and returns to Implementation. The next implementation start reuses its implementation session. Every later formal review start creates another fresh review session; no review follow-up is used to fix implementation.
+- Formal Review is optional during human handoff. Review `pass` records approval evidence and remains Reviewing; human `next` advances Reviewing to Done with or without that evidence. Review `fail` records changes requested and returns to Implementation. A human can also request changes without starting formal Review. The next implementation start reuses its implementation session. Every later formal review start creates another fresh review session; no review follow-up is used to fix implementation.
 - Prompt construction failure/invalid stage creates no run. Spawn/recovery behavior remains Phase 3. Store notices durably on runs so restart yields the same status.
 
 **Strict non-goals:** automatic start on stage movement, inferred prose outcomes, automatic Done/delivery, Git commit/push/PR, live steering, configurable columns/prompts, multi-agent, worktrees, cloud, implementation inside review sessions.
@@ -34,7 +34,7 @@
 
 ## Slice 4.3 — Review-cycle enforcement and API
 
-- [ ] Test implementation→reviewing→fresh R1 pass→human next, R1 fail→implementation reuse→fresh R2, and manual moves clearing approval per the foundation contract.
+- [ ] Test implementation→reviewing→human next without formal review, optional fresh R1 pass→human next, R1 fail→implementation reuse→fresh R2, and manual moves clearing approval per the foundation contract.
 - [ ] Expose `start_current_phase` and durable transition notice fields through Tauri/types; retain low-level Phase 3 start internally for tests, not as a UI bypass.
 - [ ] Verify: `cargo test -p craftel-core --test review_cycle && cargo test -p craftel-desktop && pnpm --filter @craftel/desktop test`.
 - [ ] Commit: `feat: automate phase and review cycles`.

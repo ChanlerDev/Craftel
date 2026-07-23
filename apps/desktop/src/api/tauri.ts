@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import type { CraftelApi } from "./craftel";
-import type { Document, DocumentProjectStatus, DocumentRevision, Project, Stage, Task, Run, PhaseSession, RunEvent } from "./types";
+import type { Document, DocumentProjectStatus, DocumentRevision, GitWorkingCopySummary, Project, Stage, Task, Run, PhaseSession, RunEvent } from "./types";
 
 export const tauriApi: CraftelApi = {
   listProjects: () => invoke<Project[]>("list_projects"),
@@ -13,6 +13,7 @@ export const tauriApi: CraftelApi = {
   registerProject: (name, path) => invoke("register_project", { name, path }),
   openProject: (id) => invoke("open_project", { id }),
   removeProject: (id) => invoke("remove_project", { id }),
+  gitWorkingCopySummary: projectId => invoke<GitWorkingCopySummary>("git_working_copy_summary", { projectId }),
   listTasks: (projectId) => invoke<Task[]>("list_tasks", { projectId }),
   createTask: (projectId, title, content) => invoke("create_task", { projectId, title, content }),
   updateTask: (projectId, taskId, title, content) => invoke("update_task", { projectId, taskId, title, content }),

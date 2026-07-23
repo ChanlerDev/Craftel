@@ -1,4 +1,4 @@
-import type { Document, DocumentProjectStatus, DocumentRevision, ExpectedDocumentState, Project, Stage, Task, PhaseSession, Run, RunEvent } from "./types";
+import type { Document, DocumentProjectStatus, DocumentRevision, ExpectedDocumentState, GitWorkingCopySummary, Project, Stage, Task, PhaseSession, Run, RunEvent } from "./types";
 
 export interface CraftelApi {
   listProjects(): Promise<Project[]>;
@@ -6,6 +6,7 @@ export interface CraftelApi {
   registerProject(name: string, path: string): Promise<Project>;
   openProject(id: string): Promise<Project>;
   removeProject(id: string): Promise<void>;
+  gitWorkingCopySummary(projectId:string):Promise<GitWorkingCopySummary>;
   listTasks(projectId: string): Promise<Task[]>;
   createTask(projectId: string, title: string, content: string): Promise<Task>;
   updateTask(projectId: string, taskId: string, title: string, content: string): Promise<Task>;

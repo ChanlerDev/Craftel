@@ -9,7 +9,7 @@ describe("stage-aware workspace model", () => {
     [task("defining"), true, false, false, "Defining in progress", "Stop run"],
     [task("implementation"), false, false, false, "Ready to implement", "Start Implementation"],
     [task("implementation"), false, true, false, "Changes requested", "Continue Implementation"],
-    [task("reviewing"), false, false, false, "Ready for fresh review", "Start fresh Review"],
+    [task("reviewing"), false, false, false, "Ready for human review", "Mark Done"],
     [task("reviewing", { review_approved: true }), false, false, false, "Approved · awaiting human", "Mark Done"],
     [task("done"), false, false, false, "Delivered", null],
   ])("maps a valid task state to one primary action", (value, active, returned, resumable, status, action) => {
@@ -22,5 +22,11 @@ describe("stage-aware workspace model", () => {
     const model = workspaceModel(task("defining"), { active: false, reviewReturned: false, resumable: true });
     expect(model.composer).toEqual({ label: "Message the defining agent", placeholder: "Clarify the requirement or ask for another SPEC.md revision", actionLabel: "Continue Defining" });
     expect(model.primary?.label).toBe("Move to Implementation");
+  });
+
+  it("keeps formal review optional during human handoff", () => {
+    const model = workspaceModel(task("reviewing"), { active: false, reviewReturned: false, resumable: false });
+    expect(model.primary?.label).toBe("Mark Done");
+    expect(model.secondary.map(action => action.label)).toEqual(["Request changes", "Run formal review"]);
   });
 });

@@ -23,12 +23,12 @@ impl Stage {
         Self::Done,
     ];
 
-    pub fn next(self, review_approved: bool) -> Result<Self, WorkflowError> {
-        match (self, review_approved) {
-            (Self::Inbox, _) => Ok(Self::Defining),
-            (Self::Defining, _) => Ok(Self::Implementation),
-            (Self::Implementation, _) => Ok(Self::Reviewing),
-            (Self::Reviewing, true) => Ok(Self::Done),
+    pub fn next(self, _review_approved: bool) -> Result<Self, WorkflowError> {
+        match self {
+            Self::Inbox => Ok(Self::Defining),
+            Self::Defining => Ok(Self::Implementation),
+            Self::Implementation => Ok(Self::Reviewing),
+            Self::Reviewing => Ok(Self::Done),
             _ => Err(WorkflowError::InvalidAction {
                 action: "next",
                 stage: self,
@@ -159,7 +159,7 @@ mod tests {
             Stage::Reviewing.fail(),
             Ok(Transition::Move(Stage::Implementation))
         );
-        assert!(Stage::Reviewing.next(false).is_err());
+        assert_eq!(Stage::Reviewing.next(false), Ok(Stage::Done));
         assert_eq!(Stage::Reviewing.next(true), Ok(Stage::Done));
     }
 
@@ -179,7 +179,12 @@ mod tests {
                 );
             }
         }
-        let valid_next = [Stage::Inbox, Stage::Defining, Stage::Implementation];
+        let valid_next = [
+            Stage::Inbox,
+            Stage::Defining,
+            Stage::Implementation,
+            Stage::Reviewing,
+        ];
         for stage in Stage::ALL {
             assert_eq!(
                 stage.apply(WorkflowAction::Next, false).is_ok(),

@@ -130,7 +130,23 @@ textarea { min-height: 152px; resize: vertical; }
 .phase-copy h2 { margin: var(--space-1) 0; font-size: var(--text-lg); }
 .phase-copy > p:not(.eyebrow) { max-width: 720px; margin: 0 0 var(--space-2); color: var(--color-text-muted); }
 .phase-copy small { color: var(--color-text-muted); }
-.phase-action { align-self: end; }
+.phase-action { align-self: end; display: flex; flex-wrap: wrap; justify-content: end; gap: var(--space-2); }
+.git-changes { margin-bottom: var(--space-3); border: var(--border-default); border-radius: var(--radius-lg); background: var(--color-surface); overflow: hidden; }
+.git-changes > header { padding: var(--space-3) var(--space-4); display: flex; align-items: center; justify-content: space-between; border-bottom: var(--border-hairline); }
+.git-changes h2 { margin: var(--space-1) 0 0; font-size: var(--text-lg); }
+.git-meta { padding: var(--space-3) var(--space-4); display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6); color: var(--color-text-muted); font-size: var(--text-sm); }
+.git-meta strong { color: var(--color-text); font-family: var(--font-mono); }
+.git-tabs { padding: 0 var(--space-4); display: flex; gap: var(--space-3); border-bottom: var(--border-hairline); }
+.git-tabs button { border: 0!important; border-bottom: 2px solid transparent!important; border-radius: 0!important; background: transparent!important; }
+.git-tabs button[aria-selected=true] { border-bottom-color: var(--color-primary)!important; }
+.git-diff { max-height: 380px; margin: 0; padding: var(--space-3) var(--space-4); overflow: auto; background: var(--color-surface-subtle); font: var(--text-xs)/1.55 var(--font-mono); }
+.git-diff span { display: block; min-width: max-content; }
+.git-diff .added { background: var(--color-success-soft); color: var(--color-success); }
+.git-diff .removed { background: var(--color-error-soft); color: var(--color-error); }
+.git-diff .hunk { color: var(--color-brand); }
+.git-empty { padding: var(--space-5) var(--space-4); color: var(--color-text-muted); }
+.git-untracked { padding: var(--space-3) var(--space-4); border-top: var(--border-hairline); font-size: var(--text-sm); }
+.git-untracked ul { margin-bottom: 0; font-family: var(--font-mono); }
 .mobile-tabs { display: none; }
 .workspace-grid { min-height: 62vh; display: grid; grid-template-columns: 224px minmax(340px,1fr) minmax(300px,34%); border: var(--border-default); border-radius: var(--radius-md); overflow: hidden; background: var(--color-surface); }
 .document-tree, .editor, .phase-panel { min-width: 0; padding: var(--space-3); background: var(--color-surface); }

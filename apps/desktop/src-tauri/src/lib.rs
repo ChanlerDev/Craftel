@@ -20,6 +20,7 @@ pub fn run() {
             list_projects,
             open_project,
             remove_project,
+            git_working_copy_summary,
             create_task,
             list_tasks,
             update_task,

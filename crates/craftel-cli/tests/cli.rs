@@ -185,6 +185,10 @@ fn missing_project_is_reported_removal_preserves_files_and_invalid_transition_fa
     f.cmd()
         .args(["next", "T0001", "--project", &id])
         .assert()
+        .success();
+    f.cmd()
+        .args(["next", "T0001", "--project", &id])
+        .assert()
         .failure()
         .stderr(predicates::str::contains("cannot next"));
     let marker = f.project.join("marker");

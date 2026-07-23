@@ -48,7 +48,15 @@ test("save conflict preserves draft and offers reload and copy",async()=>{
 test("document hints refresh changed metadata without replacing a dirty draft",async()=>{
  let hint:(p:unknown)=>void=()=>{};const d=doc(),changed={...d,content_hash:"hash-2",body:"external"};const api=fakeApi({listTasks:vi.fn().mockResolvedValue([task("defining")]),listDocuments:vi.fn().mockResolvedValueOnce([d]).mockResolvedValueOnce([changed]),readDocument:vi.fn().mockResolvedValue(d),subscribe:vi.fn(async(name,handler)=>{if(name==="document_changed")hint=handler;return()=>{}})});
  render(<TaskWorkspace api={api} project={project()} task={task("defining")} onBack={()=>{}}/>);const editor=await screen.findByLabelText("Markdown document");await userEvent.clear(editor);await userEvent.type(editor,"dirty");hint({project_id:"p1"});
- await waitFor(()=>expect(api.listDocuments).toHaveBeenCalledTimes(2));expect(editor).toHaveValue("dirty");
+ await waitFor(()=>expect(api.listDocuments).toHaveBeenCalledTimes(2));expect(editor).toHaveValue("dirty");expect(await screen.findByText(/changed elsewhere/)).toBeInTheDocument();
+});
+
+test("failed reload preserves the only copy of a dirty draft",async()=>{
+ const d=doc(),readDocument=vi.fn().mockResolvedValueOnce(d).mockRejectedValueOnce(new Error("reload failed")),writeDocument=vi.fn().mockRejectedValue({code:"conflict",message:"changed"});renderWorkspace({listDocuments:vi.fn().mockResolvedValue([d]),readDocument,writeDocument});const editor=await screen.findByLabelText("Markdown document");await userEvent.clear(editor);await userEvent.type(editor,"keep me");await userEvent.click(screen.getByRole("button",{name:"Save"}));await userEvent.click(await screen.findByRole("button",{name:"Reload"}));expect(await screen.findByText(/reload failed/)).toBeInTheDocument();expect(editor).toHaveValue("keep me");
+});
+
+test("edits made while reload is pending are never replaced",async()=>{
+ const d=doc(),reloaded=deferred<typeof d>(),readDocument=vi.fn().mockResolvedValueOnce(d).mockReturnValueOnce(reloaded.promise),writeDocument=vi.fn().mockRejectedValue({code:"conflict",message:"changed"});renderWorkspace({listDocuments:vi.fn().mockResolvedValue([d]),readDocument,writeDocument});const editor=await screen.findByLabelText("Markdown document");await userEvent.clear(editor);await userEvent.type(editor,"first draft");await userEvent.click(screen.getByRole("button",{name:"Save"}));await userEvent.click(await screen.findByRole("button",{name:"Reload"}));await userEvent.type(editor," plus later edits");reloaded.resolve(doc(undefined,{body:"external copy",content_hash:"hash-2"}));await act(async()=>{});expect(editor).toHaveValue("first draft plus later edits");
 });
 
 test("deleted restore uses Expected Missing and revision modal traps focus, closes, and returns focus",async()=>{
@@ -58,6 +66,10 @@ test("deleted restore uses Expected Missing and revision modal traps focus, clos
  expect(within(dialog).getAllByRole("button")[0]).toHaveFocus();await userEvent.tab({shift:true});expect(within(dialog).getByRole("button",{name:"Restore revision"})).toHaveFocus();
  await userEvent.click(within(dialog).getByRole("button",{name:"Restore revision"}));await waitFor(()=>expect(restore).toHaveBeenCalledWith("p1",deleted.relative_path,"rev-1",{state:"missing"}));
  await userEvent.keyboard("{Escape}");expect(screen.queryByRole("dialog")).not.toBeInTheDocument();expect(trigger).toHaveFocus();
+});
+
+test("revision restore refuses to overwrite a dirty draft",async()=>{
+ const d=doc(),restoreDocumentRevision=vi.fn();renderWorkspace({listDocuments:vi.fn().mockResolvedValue([d]),readDocument:vi.fn().mockResolvedValue(d),listDocumentRevisions:vi.fn().mockResolvedValue([revision()]),restoreDocumentRevision});const editor=await screen.findByLabelText("Markdown document");await userEvent.type(editor," changed");await userEvent.click(screen.getByRole("button",{name:"Revisions"}));await userEvent.click(await screen.findByRole("button",{name:"Restore revision"}));expect(await screen.findByText(/Save or reload this draft/)).toBeInTheDocument();expect(restoreDocumentRevision).not.toHaveBeenCalled();
 });
 
 test("controls load disabled, serialize activation, and name the current phase",async()=>{
@@ -73,19 +85,33 @@ test("active controls are Stop-only and stop is idempotent",async()=>{
  const button=await screen.findByRole("button",{name:"Stop run"});expect(screen.queryByRole("button",{name:/Start/})).toBeNull();await userEvent.dblClick(button);expect(stopRun).toHaveBeenCalledTimes(1);stop.resolve(run("stopped"));
 });
 
-test("follow-up is current-phase terminal resumable only and review starts fresh",async()=>{
+test("follow-up is current-phase terminal resumable only and formal review remains fresh",async()=>{
  const terminal=run();const {unmount}=renderWorkspace({listSessions:vi.fn().mockResolvedValue([session()]),listRuns:vi.fn().mockResolvedValue([terminal])});const composer=await screen.findByLabelText("Message the defining agent");expect(screen.getByRole("button",{name:"Move to Implementation"})).toBeEnabled();expect(screen.getByRole("button",{name:"Continue Defining"})).toBeDisabled();await userEvent.type(composer,"Tighten the acceptance criteria");expect(screen.getByRole("button",{name:"Continue Defining"})).toBeEnabled();unmount();
- renderWorkspace({listSessions:vi.fn().mockResolvedValue([session({external_session_id:null})]),listRuns:vi.fn().mockResolvedValue([terminal])},"reviewing");expect(await screen.findByRole("button",{name:"Start fresh Review"})).toBeInTheDocument();expect(screen.queryByLabelText("Follow-up")).toBeNull();
+ renderWorkspace({listSessions:vi.fn().mockResolvedValue([session({external_session_id:null})]),listRuns:vi.fn().mockResolvedValue([terminal])},"reviewing");expect(await screen.findByRole("button",{name:"Run formal review"})).toBeInTheDocument();expect(screen.getByRole("button",{name:"Mark Done"})).toBeInTheDocument();expect(screen.queryByLabelText("Follow-up")).toBeNull();
 });
 
-test("approved review waits for an explicit human next",async()=>{
- const approved=task("reviewing",{review_approved:true}),nextTask=vi.fn().mockResolvedValue(task("done"));const api=fakeApi({listTasks:vi.fn().mockResolvedValue([approved]),nextTask});
- render(<TaskWorkspace api={api} project={project()} task={approved} onBack={()=>{}}/>);expect(await screen.findByText("Approved · awaiting human")).toBeInTheDocument();await userEvent.click(screen.getByRole("button",{name:"Mark Done"}));expect(nextTask).toHaveBeenCalledWith("p1","T0001");
+test("human can mark Reviewing done without a formal review verdict",async()=>{
+ const reviewing=task("reviewing"),nextTask=vi.fn().mockResolvedValue(task("done"));const api=fakeApi({listTasks:vi.fn().mockResolvedValue([reviewing]),nextTask});
+ render(<TaskWorkspace api={api} project={project()} task={reviewing} onBack={()=>{}}/>);expect(await screen.findByText("Ready for human review")).toBeInTheDocument();await userEvent.click(screen.getByRole("button",{name:"Mark Done"}));expect(nextTask).toHaveBeenCalledWith("p1","T0001");
 });
 
-test("run change refreshes the review verdict and legal action",async()=>{
+test("run change refreshes optional formal review evidence",async()=>{
  let approved=false,runChanged:(payload:unknown)=>void=()=>{};const api=fakeApi({listTasks:vi.fn(async()=>[task("reviewing",{review_approved:approved})]),subscribe:vi.fn(async(name,handler)=>{if(name==="run_changed")runChanged=handler;return()=>{}})});
- render(<TaskWorkspace api={api} project={project()} task={task("reviewing")} onBack={()=>{}}/>);expect(await screen.findByRole("button",{name:"Start fresh Review"})).toBeInTheDocument();approved=true;act(()=>runChanged({project_id:"p1"}));expect(await screen.findByRole("button",{name:"Mark Done"})).toBeInTheDocument();
+ render(<TaskWorkspace api={api} project={project()} task={task("reviewing")} onBack={()=>{}}/>);expect(await screen.findByText("Ready for human review")).toBeInTheDocument();approved=true;act(()=>runChanged({project_id:"p1"}));expect(await screen.findByText("Approved · awaiting human")).toBeInTheDocument();expect(screen.getByRole("button",{name:"Mark Done"})).toBeInTheDocument();
+});
+
+test("human request changes returns to Implementation without starting an agent",async()=>{
+ const moveTask=vi.fn().mockResolvedValue(task("implementation")),startCurrentPhase=vi.fn();renderWorkspace({moveTask,startCurrentPhase},"reviewing");await userEvent.click(await screen.findByRole("button",{name:"Request changes"}));expect(moveTask).toHaveBeenCalledWith("p1","T0001","implementation");expect(startCurrentPhase).not.toHaveBeenCalled();
+});
+
+test("keeps independent drafts while switching between documents",async()=>{
+ const a=doc("tasks/T0001/notes/A.md",{body:"A original"}),b=doc("tasks/T0001/plans/B.md",{body:"B original"}),readDocument=vi.fn(async(_p,path)=>path===a.relative_path?a:b);renderWorkspace({listDocuments:vi.fn().mockResolvedValue([a,b]),readDocument});
+ await userEvent.click(await screen.findByRole("button",{name:/A.md/}));let editor=screen.getByLabelText("Markdown document");await userEvent.clear(editor);await userEvent.type(editor,"A draft");await userEvent.click(screen.getByRole("button",{name:/B.md/}));editor=screen.getByLabelText("Markdown document");await userEvent.clear(editor);await userEvent.type(editor,"B draft");await userEvent.click(screen.getByRole("button",{name:/A.md/}));expect(screen.getByLabelText("Markdown document")).toHaveValue("A draft");await userEvent.click(screen.getByRole("button",{name:/B.md/}));expect(screen.getByLabelText("Markdown document")).toHaveValue("B draft");
+});
+
+test("saving one document does not clear another document draft",async()=>{
+ const a=doc("tasks/T0001/notes/A.md",{body:"A original"}),b=doc("tasks/T0001/plans/B.md",{body:"B original"}),readDocument=vi.fn(async(_p,path)=>path===a.relative_path?a:b),writeDocument=vi.fn(async(_p,path,body)=>({...path===a.relative_path?a:b,body,content_hash:`saved-${path}`}));renderWorkspace({listDocuments:vi.fn().mockResolvedValue([a,b]),readDocument,writeDocument});
+ await userEvent.click(await screen.findByRole("button",{name:/A.md/}));await userEvent.clear(screen.getByLabelText("Markdown document"));await userEvent.type(screen.getByLabelText("Markdown document"),"A draft");await userEvent.click(screen.getByRole("button",{name:/B.md/}));await userEvent.clear(screen.getByLabelText("Markdown document"));await userEvent.type(screen.getByLabelText("Markdown document"),"B draft");await userEvent.click(screen.getByRole("button",{name:/A.md/}));await userEvent.click(screen.getByRole("button",{name:"Save"}));await userEvent.click(screen.getByRole("button",{name:/B.md/}));expect(screen.getByLabelText("Markdown document")).toHaveValue("B draft");expect(screen.getByText("Plans · unsaved draft")).toBeInTheDocument();
 });
 
 test("reviewing prefers review evidence over the specification",async()=>{

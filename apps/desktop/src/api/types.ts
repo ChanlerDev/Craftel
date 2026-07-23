@@ -10,6 +10,8 @@ export interface Task {
   id: string; project_id: string; title: string; content: string; stage: Stage;
   relative_dir: string; review_approved: boolean; created_at: string; updated_at: string;
 }
+export interface GitCommitSummary { hash:string; subject:string; committed_at:string; }
+export interface GitWorkingCopySummary { is_repository:boolean; branch:string|null; latest_commit:GitCommitSummary|null; staged_diff:string; unstaged_diff:string; untracked_paths:string[]; truncated:boolean; }
 export interface Document { project_id:string; relative_path:string; task_id:string|null; title:string; body:string; content_hash:string; present:boolean; indexed_at:string; }
 export interface DocumentRevision { id:string; project_id:string; relative_path:string; content_hash:string; content:number[]; captured_at:string; cause:"scan"|"watch"|"edit"|"restore"; sequence:number; }
 export interface DocumentChanged { project_id:string; path:string; change:string; }

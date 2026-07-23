@@ -4,7 +4,7 @@ use craftel_core::{
 };
 
 #[test]
-fn review_pass_waits_for_human_next_and_fail_returns_to_implementation() {
+fn formal_review_is_optional_and_fail_returns_to_implementation() {
     let temp = tempfile::tempdir().unwrap();
     let work = temp.path().join("work");
     std::fs::create_dir(&work).unwrap();
@@ -12,6 +12,19 @@ fn review_pass_waits_for_human_next_and_fail_returns_to_implementation() {
     let project = repo.register_project("project", &work).unwrap();
     let task = repo
         .create_task(NewTask::new(&project.id, "task", "content", "task"))
+        .unwrap();
+    repo.apply_transition(
+        &project.id,
+        &task.id,
+        WorkflowAction::Move(Stage::Reviewing),
+    )
+    .unwrap();
+    let done_without_formal_review = repo
+        .apply_transition(&project.id, &task.id, WorkflowAction::Next)
+        .unwrap();
+    assert_eq!(done_without_formal_review.stage.to_string(), "done");
+
+    repo.apply_transition(&project.id, &task.id, WorkflowAction::Move(Stage::Inbox))
         .unwrap();
     for action in [
         WorkflowAction::Next,

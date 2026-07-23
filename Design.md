@@ -20,7 +20,9 @@ CRAFTEL is a Markdown task-workspace orchestrator, not a Kanban app with agent c
 - **Workflow stage and run state are independent.** Moving or dragging changes only the stage. Starting, continuing, or stopping an agent is always explicit.
 - **Active runs pin the stage.** A queued or running task cannot be dragged, moved, or advanced. Stop or finish the run first so a phase command can never apply to a different workflow stage.
 - **Documents express task meaning inside a real task workspace.** The left navigation is rooted at the task's actual `craftel/tasks/TNNNN-slug/` directory and shows its Markdown files and semantic subdirectories (`decisions/`, `discussions/`, `plans/`, `reviews/`, `notes/`, and `subtasks/`). `TASK.md` appears first as a managed read-only projection; `SPEC.md` is the defining and implementation contract. Never replace this directory navigation with a duplicate task-content card or an abstract file list that hides where artifacts live.
+- **Agent Markdown has one source of truth.** Files under the task directory are authoritative for agent-authored documents. GUI edits are independent, task-local in-memory drafts keyed by relative path. Preview and Split render each draft immediately, but only Save performs an expected-hash atomic filesystem write and creates a revision. A watcher may refresh a clean document; it must preserve and mark a dirty draft conflicted. Leaving a task, project, or application with dirty drafts requires explicit confirmation. `TASK.md` is excluded because SQLite owns its managed projection.
 - **Current phase comes before history.** The phase panel shows the current session/run, observable assistant and tool events, result, and the current legal intervention. Prior sessions and runs are secondary history, not competing primary controls. Hidden reasoning is never displayed or implied.
+- **Reviewing is human handoff.** Implementation success moves to Reviewing so a person can inspect documents and bounded, read-only Git evidence: current branch, latest commit, staged and unstaged diffs, and untracked paths. The human may Mark Done, Request changes back to Implementation without starting an agent, or optionally run a formal review in a fresh session. A formal verdict is evidence, not a prerequisite for Done.
 
 ### State and action matrix
 
@@ -35,18 +37,18 @@ Only the listed primary action is prominent. A prompt composer appears only when
 | Implementation, idle | Approved `SPEC.md` + plan | Start Implementation | Entering the stage did not run |
 | Implementation, resumable or changes requested | Review findings + plan | Continue Implementation | Message composer; same implementation session |
 | Implementation, active run | Implementation evidence | Stop run | Live evidence only |
-| Reviewing, no verdict | New review packet | Start fresh Review | Every formal review creates a clean session |
+| Reviewing, no verdict | Code changes + task documents | Mark Done | Request changes or optionally run a fresh formal Review |
 | Reviewing, active review | Review packet | Stop run | Live review evidence only |
-| Reviewing, approved | Latest review packet | Mark Done | Explicit human handoff; pass alone never completes |
+| Reviewing, approved | Review packet + code changes | Mark Done | Approval is optional evidence; human delivery remains explicit |
 | Done | Documents + review evidence | None | Terminal, read-only delivery context |
 
-Review changes-requested transitions back to Implementation and exposes the review findings there. A repaired task returning to Reviewing starts a new formal review session. Review approval stays in Reviewing until the human `Mark Done` action.
+Human or formal-review changes requested transition back to Implementation and expose the review findings there. The existing Implementation session remains resumable for follow-up work. A repaired task returning to Reviewing creates a new session only if the human elects to run another formal review. Human stage moves never start an agent. Formal review approval stays in Reviewing as evidence until the human `Mark Done` action; a human may also mark Done without running formal review.
 
 ### Core journey contract
 
 The defining journey establishes the product's causal structure: capture a brief in Inbox → move to Defining → start or continue the defining conversation → inspect the resulting `SPEC.md` changes → explicitly move to Implementation → explicitly start Implementation. Conversation is useful because it changes the durable contract, not because chat history is itself the contract.
 
-`craftel pass` from Defining records a successful defining attempt but stays in Defining; the human `Move to Implementation` action owns contract approval. Implementation success may advance to Reviewing. Review pass records approval but stays in Reviewing until human delivery.
+`craftel pass` from Defining records a successful defining attempt but stays in Defining; the human `Move to Implementation` action owns contract approval. Implementation success may advance to Reviewing. Reviewing always hands control to a human. An optional formal review pass records approval but stays in Reviewing until human delivery; a formal review failure returns to Implementation.
 
 ## Semantic surface model
 
@@ -130,9 +132,10 @@ Light mode is implemented now. Geist Sans and Geist Mono are self-hosted applica
 - **Board:** compact top bar; workflow strip does not exceed 76px on wide screens. Columns are fixed 276px and horizontally scroll as one board. Columns use the faint `column` tint without a visible default outline; stage colors are forbidden.
 - **Task card:** show only ID/run state, title, and one visible “Open workspace” action. Never show document or task-content excerpts: a truncated preview is not actionable. Metadata editing is a secondary “Edit task details” menu action, not a competing visible entry point. Cards use a .5px boundary and `shadow-surface`; hover remains neutral. Dragging and starting execution remain separate controls.
 - **Workspace:** a compact stage/context header precedes the split view and contains one state-valid primary action. The semantic document navigation, editor, and current-phase panel share edges with no independent shadows. The document area is visually primary; agent activity explains how the current artifact is being refined or consumed. Run history and metadata remain compact and secondary. At narrow widths, semantic tabs switch between documents/editor and current-phase activity, with the default chosen from current work rather than presenting unrelated modules.
-- **Markdown modes:** agent-authored documents expose mutually exclusive Edit, Preview, and Split controls. Split keeps the source editor and sanitized rendered Markdown visible together and updates the preview from the in-memory draft without writing on each keystroke. `TASK.md` is selectable and rendered as a special SQLite-backed managed projection; it never exposes document editing or revision restoration controls.
+- **Markdown modes:** agent-authored documents expose mutually exclusive Edit, Preview, and Split controls. Split keeps the source editor and sanitized rendered Markdown visible together and updates the per-document in-memory draft without writing on each keystroke. Switching files preserves every dirty draft and marks it in the document tree. Save alone uses the draft's expected content hash to update the filesystem source of truth and revision history. External changes never overwrite dirty drafts. `TASK.md` is selectable and rendered as a special SQLite-backed managed projection; it never exposes document editing or revision restoration controls.
+- **Git delivery evidence:** Reviewing and Done expose a read-only, refreshable working-copy summary. Branch and latest commit precede tabbed unstaged/staged unified diffs and untracked paths. Output is bounded and visibly reports truncation. No Git mutation, absolute path, hidden credential, shell interpolation, external diff helper, or text conversion is allowed.
 - **Dialogs and revisions:** the only persistent overlay treatment. Use scrim plus dialog shadow; fields and action placement remain consistent.
-- **Activity:** current-phase evidence stays legible; prior sessions and runs are secondary history. IDs/log output use mono and messages use sans. State color is reserved for actual status. Start, Stop, Continue, Fresh Review, and Mark Done are mutually exclusive state-derived actions, never a generic toolbar.
+- **Activity:** current-phase evidence stays legible; prior sessions and runs are secondary history. IDs/log output use mono and messages use sans. State color is reserved for actual status. Start, Stop, and Continue remain mutually exclusive run-state actions. During human handoff, Mark Done is primary while Request changes and optional Formal Review are clearly secondary.
 
 ## Responsive behavior
 

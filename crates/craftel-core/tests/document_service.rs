@@ -158,3 +158,29 @@ fn two_services_reject_a_stale_disk_write() {
         Err(ServiceError::Conflict)
     ));
 }
+
+#[test]
+fn deleted_target_is_a_typed_write_conflict() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("project");
+    fs::create_dir(&root).unwrap();
+    let mut service = CraftelService::open(&temp.path().join("db")).unwrap();
+    let project = service.register_project("p", &root).unwrap();
+    service.create_task(&project.id, "x", "y").unwrap();
+    let path = "craftel/tasks/T0001-x/SPEC.md";
+    let hash = service
+        .read_document(&project.id, path)
+        .unwrap()
+        .content_hash;
+    fs::remove_file(root.join(path)).unwrap();
+
+    assert!(matches!(
+        service.write_document(
+            &project.id,
+            path,
+            "# replacement",
+            ExpectedDocumentState::Present(hash)
+        ),
+        Err(ServiceError::Conflict)
+    ));
+}

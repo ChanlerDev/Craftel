@@ -6,6 +6,7 @@ use crate::{
         reconcile_project, slugify,
     },
     domain::{Project, Stage, Task, WorkflowAction},
+    git_summary::{GitWorkingCopySummary, working_copy_summary},
     storage::{NewTask, SqliteRepository, StorageError, UpdateTask},
 };
 use sha2::Digest;
@@ -79,6 +80,18 @@ impl CraftelService {
     pub fn remove_project(&mut self, id: &str) -> Result<(), ServiceError> {
         self.watchers.remove(id);
         Ok(self.repository.remove_project(id)?)
+    }
+
+    pub fn git_working_copy_summary(
+        &self,
+        project_id: &str,
+    ) -> Result<GitWorkingCopySummary, ServiceError> {
+        let project = self.available_project(project_id)?;
+        Ok(working_copy_summary(&project.work_dir)?)
+    }
+
+    pub fn project_work_dir(&self, project_id: &str) -> Result<PathBuf, ServiceError> {
+        Ok(self.available_project(project_id)?.work_dir)
     }
 
     pub fn create_task(
@@ -239,17 +252,16 @@ impl CraftelService {
         expected: ExpectedDocumentState,
     ) -> Result<Document, ServiceError> {
         let project = self.available_project(p)?;
-        let target = self.resolve_document_path(&project, path, false)?;
+        let target = self.resolve_document_path(&project, path, true)?;
         let _lease = DocumentRepository::acquire_mutation(&self.database_path, p, "$project")?;
         let mut repo = DocumentRepository::open(&self.database_path)?;
         let current = repo.read(p, path)?;
-        if !matches_disk_state(&target, &expected)? {
-            return Err(ServiceError::Conflict);
-        }
         if !current.present {
             return Err(ServiceError::Conflict);
         }
-        atomic_write(&target, content.as_bytes())?;
+        if !atomic_write_if_matches(&target, content.as_bytes(), &expected)? {
+            return Err(ServiceError::Conflict);
+        }
         let m = fs::metadata(&target)?;
         let document = repo.ingest(
             p,
@@ -285,13 +297,12 @@ impl CraftelService {
         if snapshot.project_id != p || snapshot.relative_path != path {
             return Err(ServiceError::Conflict);
         }
-        if !matches_disk_state(&target, &expected)? {
-            return Err(ServiceError::Conflict);
-        }
         if path != "craftel/INDEX.md" {
             fs::create_dir_all(target.parent().ok_or(DocumentError::InvalidPath)?)?;
         }
-        atomic_write(&target, &snapshot.content)?;
+        if !atomic_write_if_matches(&target, &snapshot.content, &expected)? {
+            return Err(ServiceError::Conflict);
+        }
         let m = fs::metadata(&target)?;
         let document = repo.ingest(
             p,
@@ -463,22 +474,30 @@ fn matches_disk_state(path: &Path, expected: &ExpectedDocumentState) -> Result<b
         (Err(error), _) => Err(error.into()),
     }
 }
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ServiceError> {
+fn atomic_write_if_matches(
+    path: &Path,
+    bytes: &[u8],
+    expected: &ExpectedDocumentState,
+) -> Result<bool, ServiceError> {
     let tmp = path.with_file_name(format!(
         ".{}.{}.tmp",
         path.file_name().unwrap().to_string_lossy(),
         Uuid::new_v4()
     ));
     let result = (|| {
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        fs::rename(&tmp, path)
+        let mut file = fs::File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        if !matches_disk_state(path, expected)? {
+            return Ok(false);
+        }
+        fs::rename(&tmp, path)?;
+        Ok(true)
     })();
-    if result.is_err() {
+    if !matches!(result, Ok(true)) {
         let _ = fs::remove_file(&tmp);
     }
-    result.map_err(ServiceError::Io)
+    result
 }
 fn validate(title: &str, content: &str) -> Result<(), ServiceError> {
     if title.trim().is_empty() {

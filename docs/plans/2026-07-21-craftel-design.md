@@ -139,14 +139,14 @@ craftel fail T0001
 | Inbox | Defining |
 | Defining | Implementation |
 | Implementation | Reviewing |
-| Reviewing with an approved review | Done |
+| Reviewing | Done |
 | Done | No transition |
 
 `craftel pass` reports successful phase completion:
 
 | Current stage | Result |
 | --- | --- |
-| Defining | Move to Implementation |
+| Defining | Record successful definition; remain in Defining for human contract approval |
 | Implementation | Move to Reviewing |
 | Reviewing | Record Approved; remain in Reviewing for human delivery |
 
@@ -395,9 +395,9 @@ The MVP is complete when a user can:
 6. Watch assistant and tool events in the GUI while the run executes.
 7. Reopen the project and view persisted session and run history.
 8. Resume Defining or Implementation with a follow-up message.
-9. Start Review in a fresh session.
+9. Optionally start formal Review in a fresh session.
 10. Use `craftel pass`, `craftel fail`, and `craftel next` to perform the documented transitions.
-11. Keep an approved task in Reviewing until a human advances it to Done.
+11. Inspect Git delivery evidence in Reviewing, request implementation changes or advance to Done; formal review approval is optional evidence.
 12. Edit agent-owned Markdown normally and recover a previous snapshot after modification or deletion.
 
 ## 15. Explicit Non-Goals for the MVP

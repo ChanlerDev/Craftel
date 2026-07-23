@@ -3,6 +3,7 @@ use std::{fmt::Display, path::PathBuf};
 use craftel_core::{
     documents::{Document, DocumentProjectStatus, DocumentSnapshot, ExpectedDocumentState},
     domain::{Project, Stage, Task},
+    git_summary::GitWorkingCopySummary,
     runs::{PhaseSession, Run, RunEvent},
 };
 use serde::Serialize;
@@ -169,6 +170,15 @@ pub fn remove_project(state: State<'_, AppState>, id: String) -> Result<(), IpcE
 }
 
 #[tauri::command]
+pub fn git_working_copy_summary(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<GitWorkingCopySummary, IpcError> {
+    let work_dir = with_service(&state, |service| service.project_work_dir(&project_id))?;
+    craftel_core::git_summary::working_copy_summary(&work_dir).map_err(IpcError::from_display)
+}
+
+#[tauri::command]
 pub fn create_task(
     state: State<'_, AppState>,
     project_id: String,
@@ -324,6 +334,30 @@ mod tests {
         assert_eq!(
             serde_json::to_value(error).unwrap(),
             serde_json::json!({"message": "safe message", "code": "io"})
+        );
+    }
+
+    #[test]
+    fn git_summary_delegates_and_has_the_desktop_wire_shape() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = AppState::open_at(&temp.path().join("craftel.sqlite3")).unwrap();
+        let project_dir = temp.path().join("project");
+        std::fs::create_dir(&project_dir).unwrap();
+        let project = with_service(&state, |service| {
+            service.register_project("Demo", &project_dir)
+        })
+        .unwrap();
+        let summary = with_service(&state, |service| {
+            service.git_working_copy_summary(&project.id)
+        })
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(summary).unwrap(),
+            serde_json::json!({
+                "is_repository": false, "branch": null, "latest_commit": null,
+                "staged_diff": "", "unstaged_diff": "", "untracked_paths": [],
+                "truncated": false
+            })
         );
     }
 
