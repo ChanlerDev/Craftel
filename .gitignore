@@ -5,3 +5,7 @@
 **/dist/
 **/src-tauri/gen/schemas/
 .DS_Store
+/apps/desktop/src-tauri/tauri.release.conf.json
+/.release-secrets/
+*.p12
+*.cer

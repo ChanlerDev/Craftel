@@ -5,6 +5,9 @@
   "scripts": {
     "check": "pnpm check:rust && pnpm check:web",
     "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
-    "check:web": "pnpm --filter @craftel/desktop test && pnpm --filter @craftel/desktop build"
+    "check:web": "pnpm --filter @craftel/desktop test && pnpm --filter @craftel/desktop build",
+    "release:check": "node scripts/release.mjs check",
+    "release:version": "node scripts/release.mjs version",
+    "release:mac": "node scripts/release.mjs mac"
   }
 }

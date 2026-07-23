@@ -1,0 +1,48 @@
+name: Draft macOS release
+on:
+  push: { tags: ["v*"] }
+concurrency:
+  group: craftel-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    permissions: { contents: write }
+    strategy:
+      fail-fast: false
+      # tauri-action merges each architecture into the release's latest.json.
+      # Serial execution avoids a stale read/write race losing one platform.
+      max-parallel: 1
+      matrix: { target: [aarch64-apple-darwin, x86_64-apple-darwin] }
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: '${{ matrix.target }}' }
+      - uses: Swatinem/rust-cache@v2
+        with: { key: '${{ matrix.target }}' }
+      - run: pnpm install --frozen-lockfile
+      - name: Validate version and tag
+        run: node scripts/release.mjs check
+      - name: Write release overlay
+        env: { TAURI_UPDATER_PUBLIC_KEY: '${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}' }
+        run: node scripts/release.mjs configure
+      # tauri-action v1, pinned because this step receives the updater key.
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+          TAURI_SIGNING_PRIVATE_KEY: '${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}'
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: '${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}'
+          # Ad-hoc signing keeps Apple Silicon builds structurally signed without
+          # requiring an Apple Developer account. It does not provide Gatekeeper
+          # trust or notarization; see docs/releasing-macos.md.
+          APPLE_SIGNING_IDENTITY: '-'
+        with:
+          projectPath: apps/desktop
+          tagName: 'v__VERSION__'
+          releaseName: 'CRAFTEL v__VERSION__'
+          releaseDraft: true
+          prerelease: false
+          args: '--target ${{ matrix.target }} --config src-tauri/tauri.release.conf.json'

@@ -3,5 +3,11 @@
   "identifier": "default",
   "description": "Permissions required by the main CRAFTEL window",
   "windows": ["main"],
-  "permissions": ["core:window:default", "dialog:allow-open"]
+  "permissions": [
+    "core:window:default",
+    "dialog:allow-open",
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:allow-restart"
+  ]
 }
