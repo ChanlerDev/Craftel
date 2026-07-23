@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# CRAFTEL has no persistent backing services. Setup persists its toolchains in
+# ~/.local/bin, so waking an existing orb only needs a quick health check.
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
+for tool in cargo node pnpm; do
+  if ! command -v "$tool" >/dev/null; then
+    echo "CRAFTEL orb resume: missing $tool; rerun .agents/setup" >&2
+    exit 1
+  fi
+done
+
+echo "CRAFTEL orb resume: toolchains ready"

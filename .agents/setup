@@ -2,17 +2,36 @@
 set -euo pipefail
 
 if [[ "$(uname -s)" == "Linux" ]] && command -v apt-get >/dev/null; then
-  sudo apt-get update
-  sudo apt-get install -y --no-install-recommends \
-    build-essential curl file libayatana-appindicator3-dev librsvg2-dev \
-    libssl-dev libwebkit2gtk-4.1-dev xz-utils
+  packages=(
+    build-essential
+    curl
+    file
+    libayatana-appindicator3-dev
+    librsvg2-dev
+    libssl-dev
+    libwebkit2gtk-4.1-dev
+    libxdo-dev
+    pkg-config
+    xz-utils
+  )
+  missing_packages=()
+  for package in "${packages[@]}"; do
+    if ! dpkg-query -W -f='${db:Status-Abbrev}' "$package" 2>/dev/null | grep -q '^ii '; then
+      missing_packages+=("$package")
+    fi
+  done
+  if (( ${#missing_packages[@]} )); then
+    sudo apt-get update
+    sudo apt-get install -y --no-install-recommends "${missing_packages[@]}"
+  fi
 fi
 
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
-if ! command -v cargo >/dev/null; then
+if ! command -v rustup >/dev/null; then
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-    sh -s -- -y --profile minimal --default-toolchain stable
+    sh -s -- -y --profile minimal --default-toolchain none
 fi
+rustup toolchain install stable --profile minimal --component clippy --component rustfmt
 mkdir -p "$HOME/.local/bin"
 for tool in cargo rustc rustfmt rustup; do
   ln -sfn "$HOME/.cargo/bin/$tool" "$HOME/.local/bin/$tool"
@@ -54,7 +73,7 @@ if [[ "$node_ok" != true ]]; then
 fi
 
 if ! command -v corepack >/dev/null; then
-  npm install --global corepack@0.33.0
+  npm install --global --prefix "$HOME/.local" corepack@0.33.0
 fi
 corepack enable --install-directory "$HOME/.local/bin"
 export PATH="$HOME/.local/bin:$PATH"
