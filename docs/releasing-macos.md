@@ -16,12 +16,20 @@ No Apple secrets are currently required. GitHub's generated token uploads draft 
 
 ## Release flow
 
-1. `pnpm release:version 1.2.3` synchronizes desktop package, Cargo, Tauri config, and Cargo.lock. Review and commit those changes yourself.
-2. Run `pnpm check`, then `pnpm release:check` from a clean tree. Create and push exactly tag `v1.2.3` only after review. Scripts never commit, tag, push, publish, or release.
-3. The tag workflow ad-hoc signs each `.app`, packages ARM64 and x86_64 DMGs, and uploads them with updater signatures and `latest.json` to a **draft** GitHub Release. The DMG container itself is unsigned, and nothing is notarized without an Apple Developer account. Rerun the tag-triggered workflow if necessary; manual dispatch is intentionally disabled so a release cannot bypass the tag gate.
-4. Inspect every asset and release note, then manually publish the draft. Publishing is what makes the `latest` updater endpoint visible.
+CRAFTEL currently permits **patch releases only**. From `0.1.0`, the only accepted next version is `0.1.1`; minor, major, skipped patch, repeated, downgraded, and prerelease versions are rejected by both the version script and tag preflight.
+
+1. Land normal changes on `main` and wait for the `CI` workflow to pass. A push to `main` runs the complete Linux check plus an Apple Silicon native compile/bundle check; it does not create a Release.
+2. Run `pnpm release:version 0.1.1` (substitute only the immediate next patch). It synchronizes desktop package, Cargo, Tauri config, and Cargo.lock. Review and commit those version changes to `main`, then wait for `CI` again.
+3. From that green `main` commit, run `pnpm release:check`. Create and push the matching tag, for example `v0.1.1`. Scripts never commit, tag, push, publish, or release themselves. The release workflow requires the tagged commit to belong to `main`, fetches prior tags, and rejects anything except the next patch.
+4. The tag starts `Draft macOS release`, which ad-hoc signs each `.app`, serially packages ARM64 and x86_64 DMGs, and uploads them with updater archives, signatures, and a merged `latest.json` to a **Draft GitHub Release**. The DMG container itself is unsigned, and nothing is notarized without an Apple Developer account.
+5. Inspect both architectures, updater entries, signatures, and release notes. Manually publish the draft only when they are correct. Draft assets are not served by `releases/latest`; publishing makes that release's `latest.json` visible at the configured updater endpoint.
+6. Installed apps check that `latest.json` at startup at most once per 24 hours. If its patch version is newer, the app prompts; it downloads only after the user presses **Download**, verifies the Tauri signature, installs, and offers restart.
+
+Rerun the tag-triggered workflow if necessary; manual dispatch is intentionally disabled so a release cannot bypass the tag gate. Before the first tag, configure the three updater secrets described above. Keep the updater private key and password backed up; they are not regenerated per patch.
 
 For a local build, export the updater public key and private signing key, then run `pnpm release:mac aarch64-apple-darwin`; on an Intel-capable macOS runner use `pnpm release:mac x86_64-apple-darwin`. The script defaults `APPLE_SIGNING_IDENTITY` to `-` for ad-hoc signing. Tauri merges `--config` after the main config; the script creates a mode-0600, gitignored overlay and removes it after the build. Ordinary development does not need updater keys.
+
+The corrupt 1×1 placeholder PNG that previously broke macOS bundling has been replaced with a valid 1024×1024 RGBA PNG. A future brand review may replace it, but the checked-in asset is now structurally valid for Tauri's window-icon loader and macOS ICNS generation.
 
 ## Installing an ad-hoc signed build
 

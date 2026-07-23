@@ -16,6 +16,7 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
@@ -24,6 +25,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { key: '${{ matrix.target }}' }
       - run: pnpm install --frozen-lockfile
+      - name: Require tag commit on main
+        run: git merge-base --is-ancestor "${GITHUB_SHA}^{commit}" origin/main
       - name: Validate version and tag
         run: node scripts/release.mjs check
       - name: Write release overlay

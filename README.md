@@ -34,7 +34,7 @@ pnpm check
 
 ## macOS distribution
 
-Ad-hoc signed Apple Silicon and Intel builds are produced as draft GitHub Releases and support cryptographically verified, user-controlled in-app updates. There is currently no Apple Developer account, so builds are not Developer ID signed or notarized and macOS users must explicitly allow the known download or remove CRAFTEL's quarantine attribute. Maintainers should follow [`docs/releasing-macos.md`](docs/releasing-macos.md) for updater key generation, the exact `xattr` command, version/tag synchronization, one-command local builds, verification, and manual publication.
+Ad-hoc signed Apple Silicon and Intel builds are produced as draft GitHub Releases and support cryptographically verified, user-controlled in-app updates. Releases are patch-only: tooling accepts exactly the immediate next patch and rejects minor, major, skipped, repeated, downgraded, or prerelease versions. There is currently no Apple Developer account, so builds are not Developer ID signed or notarized and macOS users must explicitly allow the known download or remove CRAFTEL's quarantine attribute. Maintainers should follow [`docs/releasing-macos.md`](docs/releasing-macos.md) for updater key generation, the exact `xattr` command, main/tag/Draft Release sequencing, one-command local builds, verification, and manual publication.
 
 This runs Rust formatting, Clippy with warnings denied, all workspace tests, frontend tests, TypeScript, and the production Vite build.
 
