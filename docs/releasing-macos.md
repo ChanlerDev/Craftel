@@ -29,7 +29,7 @@ Rerun the tag-triggered workflow if necessary; manual dispatch is intentionally 
 
 For a local build, export the updater public key and private signing key, then run `pnpm release:mac aarch64-apple-darwin`; on an Intel-capable macOS runner use `pnpm release:mac x86_64-apple-darwin`. The script defaults `APPLE_SIGNING_IDENTITY` to `-` for ad-hoc signing. Tauri merges `--config` after the main config; the script creates a mode-0600, gitignored overlay and removes it after the build. Ordinary development does not need updater keys.
 
-The corrupt 1×1 placeholder PNG that previously broke macOS bundling has been replaced with a valid 1024×1024 RGBA PNG. A future brand review may replace it, but the checked-in asset is now structurally valid for Tauri's window-icon loader and macOS ICNS generation.
+The corrupt 1×1 placeholder PNG that previously broke macOS bundling has been replaced with a valid 512×512 RGBA PNG. Keep `icons/icon.png` at a normal-density ICNS size supported by Tauri (512×512 or smaller); Tauri treats a 1024×1024 PNG as valid only when its filename ends in `@2x.png`. A future brand review may replace the artwork, but the checked-in asset is now valid for both Tauri's window-icon loader and macOS ICNS generation.
 
 ## Installing an ad-hoc signed build
 
