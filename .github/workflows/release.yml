@@ -1,11 +1,119 @@
 name: Draft macOS release
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional exact next patch (leave blank to calculate it)"
+        required: false
+        type: string
   push: { tags: ["v*"] }
 concurrency:
-  group: craftel-release-${{ github.ref }}
+  # One global release lane prevents two dispatches from calculating the same patch.
+  group: craftel-patch-release
   cancel-in-progress: false
 jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    outputs:
+      commit: '${{ steps.release.outputs.commit }}'
+      tag: '${{ steps.release.outputs.tag }}'
+      version: '${{ steps.release.outputs.version }}'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            pkg-config
+      - run: pnpm install --frozen-lockfile
+      - name: Require current, green main HEAD and updater keys
+        env:
+          GH_TOKEN: '${{ github.token }}'
+          TAURI_UPDATER_PUBLIC_KEY: '${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}'
+          TAURI_SIGNING_PRIVATE_KEY: '${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}'
+        run: |
+          test "${GITHUB_REF}" = refs/heads/main
+          git fetch origin main --tags
+          base=$(git rev-parse origin/main)
+          test "$base" = "$GITHUB_SHA" || {
+            echo "main advanced after this release was dispatched; start a new run" >&2
+            exit 1
+          }
+          test -n "$TAURI_UPDATER_PUBLIC_KEY" || {
+            echo "TAURI_UPDATER_PUBLIC_KEY is not configured" >&2
+            exit 1
+          }
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || {
+            echo "TAURI_SIGNING_PRIVATE_KEY is not configured" >&2
+            exit 1
+          }
+          successful_runs=$(gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+            -f head_sha="$base" -f branch=main -f event=push -f status=success \
+            --jq '.workflow_runs | length')
+          test "$successful_runs" -gt 0 || {
+            echo "current main HEAD has no successful push CI run" >&2
+            exit 1
+          }
+      - name: Create and atomically push patch release commit and tag
+        id: release
+        env:
+          RELEASE_VERSION: '${{ inputs.version }}'
+        run: |
+          set -euo pipefail
+          base=$(git rev-parse origin/main)
+          version=${RELEASE_VERSION:-$(node scripts/release.mjs next)}
+          node scripts/release.mjs version "$version"
+          pnpm check
+
+          changed=$(git diff --name-only HEAD | LC_ALL=C sort)
+          expected=$(printf '%s\n' \
+            Cargo.lock \
+            apps/desktop/package.json \
+            apps/desktop/src-tauri/Cargo.toml \
+            apps/desktop/src-tauri/tauri.conf.json | LC_ALL=C sort)
+          test "$changed" = "$expected" || {
+            echo "version command changed unexpected files:" >&2
+            printf '%s\n' "$changed" >&2
+            exit 1
+          }
+
+          tag="v$version"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Cargo.lock apps/desktop/package.json \
+            apps/desktop/src-tauri/Cargo.toml \
+            apps/desktop/src-tauri/tauri.conf.json
+          git commit -m "chore: release $tag"
+          git tag -a "$tag" -m "CRAFTEL $tag"
+          node scripts/release.mjs check
+
+          # The lease rejects a concurrent main update; --atomic prevents a lone
+          # commit or tag if either ref cannot be written.
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          git push --atomic --force-with-lease="refs/heads/main:$base" origin \
+            HEAD:refs/heads/main "refs/tags/$tag"
   build:
+    needs: prepare
+    if: always() && !cancelled() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     permissions: { contents: write }
     strategy:
       fail-fast: false
@@ -16,7 +124,9 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          ref: '${{ needs.prepare.outputs.commit || github.sha }}'
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
@@ -26,7 +136,7 @@ jobs:
         with: { key: '${{ matrix.target }}' }
       - run: pnpm install --frozen-lockfile
       - name: Require tag commit on main
-        run: git merge-base --is-ancestor "${GITHUB_SHA}^{commit}" origin/main
+        run: git merge-base --is-ancestor HEAD origin/main
       - name: Validate version and tag
         run: node scripts/release.mjs check
       - name: Write release overlay
