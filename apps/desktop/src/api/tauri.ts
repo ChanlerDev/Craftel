@@ -1,15 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import type { CraftelApi } from "./craftel";
-import type { Document, DocumentProjectStatus, DocumentRevision, GitWorkingCopySummary, Project, Stage, Task, Run, PhaseSession, RunEvent } from "./types";
+import type { DirectoryListing, Document, DocumentProjectStatus, DocumentRevision, GitWorkingCopySummary, Project, Stage, Task, Run, PhaseSession, RunEvent } from "./types";
 
 export const tauriApi: CraftelApi = {
   listProjects: () => invoke<Project[]>("list_projects"),
-  async selectProjectDirectory() {
-    const result = await open({ directory: true, multiple: false });
-    return typeof result === "string" ? result : null;
-  },
+  listDirectory: path => invoke<DirectoryListing>("list_directory", { path }),
   registerProject: (name, path) => invoke("register_project", { name, path }),
   openProject: (id) => invoke("open_project", { id }),
   removeProject: (id) => invoke("remove_project", { id }),

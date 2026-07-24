@@ -112,6 +112,22 @@ textarea { min-height: 152px; resize: vertical; }
 .actions button:not(.primary), .workspace button:not(.primary), .toast button { min-height: var(--control-height); padding: var(--space-1) var(--space-2); border: var(--border-default); border-radius: var(--radius-sm); background: var(--color-surface); font-weight: var(--weight-medium); }
 .toast { position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: var(--z-toast); padding: var(--space-3); border: var(--border-default); border-left: 4px solid var(--color-error); background: var(--color-surface-raised); box-shadow: var(--shadow-menu); }
 .notice { margin: var(--space-2) 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-warning); border-radius: var(--radius-sm); background: var(--color-warning-soft); color: var(--color-warning); }
+.directory-dialog { width: min(720px,100%); padding: var(--space-6); border: var(--border-default); border-radius: calc(var(--radius-lg) * 2); background: var(--color-surface-raised); box-shadow: var(--shadow-dialog); }
+.directory-dialog h2 { margin-bottom: var(--space-3); font-size: var(--text-xl); }
+.directory-path { display: grid; grid-template-columns: var(--touch-target) minmax(0,1fr); gap: var(--space-2); }
+.directory-path button { min-height: var(--touch-target); border: 0; border-radius: 50%; background: var(--color-surface-subtle); font-size: var(--text-lg); }
+.directory-path input { min-width: 0; font-size: var(--text-lg); }
+.directory-list { height: min(46vh,390px); margin-top: var(--space-3); padding: var(--space-2); overflow-y: auto; border: var(--border-default); border-radius: var(--radius-lg); }
+.directory-list > button { width: 100%; min-height: var(--touch-target); padding: var(--space-2) var(--space-3); display: flex; align-items: center; gap: var(--space-3); border: 0; border-radius: var(--radius-md); background: transparent; text-align: left; font-size: var(--text-lg); }
+.directory-list > button:hover { background: var(--color-surface-hover); }
+.directory-list > button[aria-pressed=true] { background: var(--color-surface-selected); font-weight: var(--weight-medium); }
+.directory-list > button span:first-child { color: var(--color-text-muted); font-size: 22px; }
+.directory-list > p { margin: var(--space-6) auto; color: var(--color-text-muted); text-align: center; }
+.directory-help { margin: var(--space-4) 0 0; color: var(--color-text-muted); }
+.directory-dialog > [role=alert] { margin: var(--space-3) 0 0; }
+.directory-dialog .actions { margin-top: var(--space-6); }
+.directory-dialog .actions button { min-height: var(--touch-target); padding-inline: var(--space-4); border: 0; border-radius: var(--radius-lg); background: transparent; font-weight: var(--weight-semibold); }
+.directory-dialog .actions .primary { min-width: 120px; background: var(--color-primary); }
 
 /* 7. Unified task workspace */
 .workspace-head { min-height: var(--topbar-height); display: flex; align-items: center; gap: var(--space-3); }

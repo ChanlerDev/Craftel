@@ -1,4 +1,7 @@
-use std::{fmt::Display, path::PathBuf};
+use std::{
+    fmt::Display,
+    path::{Path, PathBuf},
+};
 
 use craftel_core::{
     documents::{Document, DocumentProjectStatus, DocumentSnapshot, ExpectedDocumentState},
@@ -143,6 +146,89 @@ fn with_service<T>(
         .lock()
         .map_err(|_| IpcError::from_display("CRAFTEL service state is unavailable"))?;
     operation(&mut service).map_err(IpcError::from_service)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DirectoryEntry {
+    pub name: String,
+    pub path: String,
+    pub hidden: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DirectoryListing {
+    pub path: String,
+    pub parent: Option<String>,
+    pub entries: Vec<DirectoryEntry>,
+}
+
+fn directory_listing(path: Option<&Path>) -> Result<DirectoryListing, IpcError> {
+    let requested = match path {
+        Some(path) => path.to_path_buf(),
+        None => dirs::home_dir()
+            .ok_or_else(|| IpcError::from_display("The home directory is unavailable"))?,
+    };
+    if !requested.is_absolute() {
+        return Err(IpcError {
+            message: "Enter an absolute folder path".into(),
+            code: IpcErrorCode::InvalidPath,
+        });
+    }
+    let metadata = std::fs::symlink_metadata(&requested).map_err(|error| IpcError {
+        message: format!("The folder cannot be opened: {error}"),
+        code: IpcErrorCode::InvalidPath,
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(IpcError {
+            message: "The path must identify a directory, not a file or symbolic link".into(),
+            code: IpcErrorCode::InvalidPath,
+        });
+    }
+    let canonical = dunce::canonicalize(&requested).map_err(|error| IpcError {
+        message: format!("The folder cannot be resolved: {error}"),
+        code: IpcErrorCode::InvalidPath,
+    })?;
+    let path = canonical.to_str().ok_or_else(|| IpcError {
+        message: "The folder path is not valid UTF-8".into(),
+        code: IpcErrorCode::InvalidUtf8,
+    })?;
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(&canonical).map_err(|error| IpcError {
+        message: format!("The folder cannot be read: {error}"),
+        code: IpcErrorCode::Io,
+    })? {
+        let Ok(entry) = entry else { continue };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() || file_type.is_symlink() {
+            continue;
+        }
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let entry_path = entry.path();
+        let Some(entry_path) = entry_path.to_str().map(str::to_owned) else {
+            continue;
+        };
+        entries.push(DirectoryEntry {
+            hidden: name.starts_with('.'),
+            name,
+            path: entry_path,
+        });
+    }
+    entries.sort_by_cached_key(|entry| entry.name.to_lowercase());
+    let parent = canonical.parent().and_then(Path::to_str).map(str::to_owned);
+    Ok(DirectoryListing {
+        path: path.to_owned(),
+        parent,
+        entries,
+    })
+}
+
+#[tauri::command]
+pub fn list_directory(path: Option<PathBuf>) -> Result<DirectoryListing, IpcError> {
+    directory_listing(path.as_deref())
 }
 
 #[tauri::command]
@@ -335,6 +421,73 @@ mod tests {
             serde_json::to_value(error).unwrap(),
             serde_json::json!({"message": "safe message", "code": "io"})
         );
+    }
+
+    #[test]
+    fn directory_listing_returns_only_real_directories_in_name_order() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("beta")).unwrap();
+        std::fs::create_dir(temp.path().join("Alpha")).unwrap();
+        std::fs::create_dir(temp.path().join(".hidden")).unwrap();
+        std::fs::write(temp.path().join("file.txt"), "ignored").unwrap();
+
+        let listing = directory_listing(Some(temp.path())).unwrap();
+
+        assert_eq!(
+            listing.path,
+            temp.path().canonicalize().unwrap().to_str().unwrap()
+        );
+        assert_eq!(
+            listing
+                .entries
+                .iter()
+                .map(|entry| (entry.name.as_str(), entry.hidden))
+                .collect::<Vec<_>>(),
+            [(".hidden", true), ("Alpha", false), ("beta", false)]
+        );
+        assert_eq!(
+            listing.parent.as_deref(),
+            temp.path()
+                .canonicalize()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .to_str()
+        );
+    }
+
+    #[test]
+    fn directory_listing_rejects_relative_files_and_symlinks() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("file.txt");
+        std::fs::write(&file, "not a directory").unwrap();
+        assert_eq!(
+            directory_listing(Some(Path::new("relative")))
+                .unwrap_err()
+                .code,
+            IpcErrorCode::InvalidPath
+        );
+        assert_eq!(
+            directory_listing(Some(&file)).unwrap_err().code,
+            IpcErrorCode::InvalidPath
+        );
+
+        #[cfg(unix)]
+        {
+            let link = temp.path().join("link");
+            std::os::unix::fs::symlink(temp.path(), &link).unwrap();
+            assert_eq!(
+                directory_listing(Some(&link)).unwrap_err().code,
+                IpcErrorCode::InvalidPath
+            );
+            assert!(
+                directory_listing(Some(temp.path()))
+                    .unwrap()
+                    .entries
+                    .iter()
+                    .all(|entry| entry.name != "link")
+            );
+        }
     }
 
     #[test]

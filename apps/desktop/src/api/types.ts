@@ -6,6 +6,9 @@ export interface Project {
   created_at: string; last_opened_at: string;
 }
 
+export interface DirectoryEntry { name: string; path: string; hidden: boolean; }
+export interface DirectoryListing { path: string; parent: string | null; entries: DirectoryEntry[]; }
+
 export interface Task {
   id: string; project_id: string; title: string; content: string; stage: Stage;
   relative_dir: string; review_approved: boolean; created_at: string; updated_at: string;

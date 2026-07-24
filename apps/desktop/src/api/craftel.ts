@@ -1,8 +1,8 @@
-import type { Document, DocumentProjectStatus, DocumentRevision, ExpectedDocumentState, GitWorkingCopySummary, Project, Stage, Task, PhaseSession, Run, RunEvent } from "./types";
+import type { DirectoryListing, Document, DocumentProjectStatus, DocumentRevision, ExpectedDocumentState, GitWorkingCopySummary, Project, Stage, Task, PhaseSession, Run, RunEvent } from "./types";
 
 export interface CraftelApi {
   listProjects(): Promise<Project[]>;
-  selectProjectDirectory(): Promise<string | null>;
+  listDirectory(path?: string): Promise<DirectoryListing>;
   registerProject(name: string, path: string): Promise<Project>;
   openProject(id: string): Promise<Project>;
   removeProject(id: string): Promise<void>;
